@@ -44,7 +44,7 @@ export default function SearchPage() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
   // Debounce ref for range inputs
-  const rangeTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const rangeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => { api.groups.list().then(setGroups); }, []);
 
@@ -203,12 +203,18 @@ export default function SearchPage() {
     || Object.values(dropdownFilters).some(v => v)
     || Object.values(rangeFilters).some(r => r.min || r.max);
   const hasSidebar = Object.keys(facets).length > 0 || tags.length > 0;
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const activeFilterCount = (selectedTags.size)
+    + Object.values(checkboxFilters).reduce((n, s) => n + s.size, 0)
+    + Object.values(dropdownFilters).filter(v => v).length
+    + Object.values(rangeFilters).filter(r => r.min || r.max).length;
 
   return (
     <div>
       <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100 mb-6">Search</h1>
 
-      <form onSubmit={handleSearch} className="flex gap-2 mb-6">
+      <form onSubmit={handleSearch} className="flex flex-wrap gap-2 mb-6">
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
@@ -229,10 +235,38 @@ export default function SearchPage() {
         </button>
       </form>
 
-      <div className={`flex gap-6 ${hasSidebar ? '' : ''}`}>
+      {/* Mobile filter toggle */}
+      {hasSidebar && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="md:hidden flex items-center gap-2 mb-4 px-4 py-2 bg-stone-100 dark:bg-stone-800 rounded-lg text-sm font-medium text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
+          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+        </button>
+      )}
+
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <div className="flex gap-6">
         {/* Sidebar filters */}
         {hasSidebar && (
-          <aside className="w-60 shrink-0 space-y-1">
+          <aside className={`
+            fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-stone-900 shadow-xl p-5 overflow-y-auto transition-transform duration-200 ease-in-out
+            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+            md:static md:translate-x-0 md:w-60 md:shadow-none md:p-0 md:z-auto md:bg-transparent md:dark:bg-transparent
+            shrink-0 space-y-1
+          `}>
+            {/* Mobile close button */}
+            <div className="flex items-center justify-between mb-3 md:hidden">
+              <span className="text-sm font-semibold text-stone-700 dark:text-stone-200">Filters</span>
+              <button onClick={() => setSidebarOpen(false)} className="p-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-500">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
             {/* Tags */}
             {tags.length > 0 && (
               <FilterSection title="Tags" collapsed={collapsedSections.has('_tags')} onToggle={() => toggleSection('_tags')}>
@@ -389,29 +423,42 @@ export default function SearchPage() {
           {results.length > 0 && (
             <div className="space-y-2">
               <p className="text-sm text-stone-400 dark:text-stone-500 mb-3">{results.length} result{results.length === 1 ? '' : 's'}</p>
-              {results.map(item => (
+              {results.map(item => {
+                const primaryImage = item.images?.[0];
+                return (
                 <Link
                   key={item.id}
                   to={`/groups/${item.group_id}/items/${item.id}`}
-                  className="block bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 p-4 hover:border-stone-300 dark:hover:border-stone-600 transition-colors"
+                  className="flex bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-colors overflow-hidden"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
+                  {primaryImage && (
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-stone-100 dark:bg-stone-800">
+                      <img
+                        src={api.images.thumbUrl(item.id, primaryImage.id)}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 flex items-center justify-between p-4 min-w-0">
+                    <div className="min-w-0">
                       <span className="font-medium text-stone-700 dark:text-stone-200">{item.name}</span>
                       {item.tags && item.tags.length > 0 && (
-                        <div className="flex gap-1 mt-1">
+                        <div className="flex flex-wrap gap-1 mt-1">
                           {item.tags.map(t => (
                             <span key={t} className="text-xs bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded">{t}</span>
                           ))}
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-wrap gap-3 text-right">
+                    <div className="hidden sm:flex flex-wrap gap-3 text-right shrink-0 ml-3">
                       {fieldDisplay(item.data)}
                     </div>
                   </div>
                 </Link>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
