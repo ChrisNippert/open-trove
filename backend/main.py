@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Organizer", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Open Trove", version="0.1.0", lifespan=lifespan)
 
 # CORS — allow frontend dev server
 app.add_middleware(

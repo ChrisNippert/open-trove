@@ -22,7 +22,7 @@ export default function Layout() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14">
             <Link to="/" className="text-lg font-semibold text-stone-800 dark:text-stone-100 tracking-tight">
-              Organizer
+              Open Trove
             </Link>
             <div className="flex items-center gap-1">
               <NavLink to="/groups" active={isActive('/groups')}>

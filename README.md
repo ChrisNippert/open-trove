@@ -1,10 +1,10 @@
-# Organizer
+# Open Trove
 
 A self-hosted inventory and collection manager with user-defined schemas. Build your own structure for anything — wardrobe, kitchen, board games, tools, whatever — then search, filter, and browse it all from one place.
 
 ## What it does
 
-Organizer lets you create **collections** (called Groups), define **schemas** that describe the shape of items in that collection, then add items with structured data, tags, and images. Think of it like a personal database with a UI that adapts to whatever you're tracking.
+Open Trove lets you create **collections** (called Groups), define **schemas** that describe the shape of items in that collection, then add items with structured data, tags, and images. Think of it like a personal database with a UI that adapts to whatever you're tracking.
 
 A clothing collection might have fields for brand, size, season, and price. A recipe collection might have text areas for ingredients and instructions. A board game shelf might track player count and play time. You define the structure — the app builds the forms and filters to match.
 
