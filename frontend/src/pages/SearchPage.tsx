@@ -432,7 +432,7 @@ export default function SearchPage() {
                   className="flex bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-colors overflow-hidden"
                 >
                   {primaryImage && (
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-stone-100 dark:bg-stone-800">
+                    <div className="w-20 sm:w-24 shrink-0 bg-stone-100 dark:bg-stone-800 self-stretch">
                       <img
                         src={api.images.thumbUrl(item.id, primaryImage.id)}
                         alt=""
@@ -441,20 +441,18 @@ export default function SearchPage() {
                       />
                     </div>
                   )}
-                  <div className="flex-1 flex items-center justify-between p-4 min-w-0">
-                    <div className="min-w-0">
-                      <span className="font-medium text-stone-700 dark:text-stone-200">{item.name}</span>
-                      {item.tags && item.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {item.tags.map(t => (
-                            <span key={t} className="text-xs bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded">{t}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="hidden sm:flex flex-wrap gap-3 text-right shrink-0 ml-3">
+                  <div className="flex-1 py-3 px-4 min-w-0">
+                    <span className="font-medium text-stone-700 dark:text-stone-200">{item.name}</span>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
                       {fieldDisplay(item.data)}
                     </div>
+                    {item.tags && item.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {item.tags.map(t => (
+                          <span key={t} className="text-xs bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded">{t}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </Link>
                 );
