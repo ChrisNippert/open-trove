@@ -1,0 +1,259 @@
+import json
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select, func, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from ..database import get_db
+from ..models import Item, ItemTag, ItemSchema
+from ..schemas import ItemOut, ImageOut
+from ..services.search import search_items, filter_items_by_field
+
+router = APIRouter(prefix="/api/search", tags=["search"])
+
+
+def _item_to_out(item: Item) -> ItemOut:
+    return ItemOut(
+        id=item.id,
+        group_id=item.group_id,
+        schema_id=item.schema_id,
+        name=item.name or "",
+        data=json.loads(item.data) if item.data else {},
+        tags=[t.tag for t in (item.tags or [])],
+        images=[ImageOut.model_validate(img) for img in sorted(item.images or [], key=lambda i: i.sort_order)],
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+@router.get("", response_model=list[ItemOut])
+async def search(
+    q: str = "",
+    group_id: int | None = None,
+    field: str | None = None,
+    op: str | None = None,
+    value: str | None = None,
+    tag: str | None = None,
+    filters: str | None = None,
+    offset: int = 0,
+    limit: int = Query(default=50, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search items by text, filter by field value, filter by tag.
+
+    Text search: ?q=blue+flannel
+    Field filter: ?group_id=1&field=category&op==&value=tops
+    Tag filter: ?tag=quick
+    Multi-filter: ?group_id=1&filters=[{"field":"cuisine","op":"=","value":"Italian"}]
+    Combined: ?q=flannel&group_id=1&tag=winter
+    """
+    item_ids = None
+
+    # Text search
+    if q.strip():
+        item_ids = set(await search_items(db, q, group_id=group_id, limit=500))
+
+    # Tag filter (supports comma-separated for multi-tag OR)
+    if tag and tag.strip():
+        tag_values = [t.strip() for t in tag.split(',') if t.strip()]
+        tag_result = await db.execute(
+            select(ItemTag.item_id).where(ItemTag.tag.in_(tag_values))
+        )
+        tag_ids = set(row[0] for row in tag_result.fetchall())
+        # If group_id was given, intersect with items in that group
+        if group_id is not None:
+            group_items = await db.execute(
+                select(Item.id).where(Item.group_id == group_id)
+            )
+            group_item_ids = set(row[0] for row in group_items.fetchall())
+            tag_ids = tag_ids & group_item_ids
+        if item_ids is not None:
+            item_ids = item_ids & tag_ids
+        else:
+            item_ids = tag_ids
+
+    # Single field filter (legacy)
+    if field and op and value is not None and group_id is not None:
+        # Try to parse numeric value
+        try:
+            parsed_value = float(value)
+        except ValueError:
+            parsed_value = value
+
+        filtered_ids = set(await filter_items_by_field(
+            db, group_id, field, op, parsed_value, limit=500
+        ))
+        if item_ids is not None:
+            item_ids = item_ids & filtered_ids
+        else:
+            item_ids = filtered_ids
+
+    # Multi-field filters (JSON array)
+    if filters and group_id is not None:
+        try:
+            filter_list = json.loads(filters)
+        except (json.JSONDecodeError, TypeError):
+            filter_list = []
+        for f in filter_list:
+            f_field = f.get("field")
+            f_op = f.get("op", "=")
+            f_value = f.get("value")
+            if not f_field or f_value is None:
+                continue
+
+            # IN operator: OR within a single field (for multi-checkbox)
+            if f_op.lower() == "in" and isinstance(f_value, list):
+                combined_ids: set[int] = set()
+                for val in f_value:
+                    ids = set(await filter_items_by_field(
+                        db, group_id, f_field, "=", val, limit=500
+                    ))
+                    combined_ids.update(ids)
+                if item_ids is not None:
+                    item_ids = item_ids & combined_ids
+                else:
+                    item_ids = combined_ids
+                continue
+
+            try:
+                parsed_val = float(f_value) if isinstance(f_value, str) else f_value
+            except (ValueError, TypeError):
+                parsed_val = f_value
+            f_ids = set(await filter_items_by_field(
+                db, group_id, f_field, f_op, parsed_val, limit=500
+            ))
+            if item_ids is not None:
+                item_ids = item_ids & f_ids
+            else:
+                item_ids = f_ids
+
+    if item_ids is not None:
+        if not item_ids:
+            return []
+        query = (
+            select(Item)
+            .options(selectinload(Item.tags), selectinload(Item.images))
+            .where(Item.id.in_(item_ids))
+            .order_by(Item.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    else:
+        # No search criteria — return recent items
+        query = (
+            select(Item)
+            .options(selectinload(Item.tags), selectinload(Item.images))
+            .order_by(Item.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        if group_id is not None:
+            query = query.where(Item.group_id == group_id)
+
+    result = await db.execute(query)
+    items = result.scalars().all()
+    return [_item_to_out(item) for item in items]
+
+
+FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit"}
+
+
+@router.get("/facets")
+async def get_facets(
+    group_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return filterable facets with counts and ranges for a group."""
+    schemas_result = await db.execute(
+        select(ItemSchema).where(ItemSchema.group_id == group_id)
+    )
+    schemas = schemas_result.scalars().all()
+
+    facets: dict[str, dict] = {}
+    for schema in schemas:
+        defn = json.loads(schema.definition) if isinstance(schema.definition, str) else schema.definition
+        sections = defn.get("sections", {})
+        for _sec_name, fields in sections.items():
+            for field_name, field_def in fields.items():
+                ftype = field_def.get("type", "string")
+                if ftype not in FACET_TYPES:
+                    continue
+
+                if ftype in ("dropdown", "multiselect"):
+                    schema_options = (
+                        field_def.get("options")
+                        or field_def.get("dropdown-items")
+                        or field_def.get("multiselect-items")
+                        or []
+                    )
+                    # Count items per option value
+                    count_result = await db.execute(text(
+                        "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
+                        "FROM items WHERE group_id = :gid "
+                        "AND json_extract(data, :path) IS NOT NULL "
+                        "GROUP BY val"
+                    ), {"path": f"$.{field_name}", "gid": group_id})
+                    value_counts = {str(r[0]): r[1] for r in count_result.fetchall()}
+                    options = [
+                        {"value": opt, "count": value_counts.get(opt, 0)}
+                        for opt in schema_options
+                    ]
+                    facets[field_name] = {
+                        "type": ftype, "field": field_name, "options": options,
+                    }
+
+                elif ftype == "boolean":
+                    count_result = await db.execute(text(
+                        "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
+                        "FROM items WHERE group_id = :gid "
+                        "AND json_extract(data, :path) IS NOT NULL "
+                        "GROUP BY val"
+                    ), {"path": f"$.{field_name}", "gid": group_id})
+                    counts = {str(r[0]).lower(): r[1] for r in count_result.fetchall()}
+                    true_count = counts.get("true", counts.get("1", 0))
+                    false_count = counts.get("false", counts.get("0", 0))
+                    facets[field_name] = {
+                        "type": "boolean", "field": field_name,
+                        "true_count": true_count, "false_count": false_count,
+                    }
+
+                elif ftype in ("int", "float"):
+                    mm = await db.execute(text(
+                        "SELECT MIN(CAST(json_extract(data, :path) AS REAL)), "
+                        "MAX(CAST(json_extract(data, :path) AS REAL)) "
+                        "FROM items WHERE group_id = :gid "
+                        "AND json_extract(data, :path) IS NOT NULL"
+                    ), {"path": f"$.{field_name}", "gid": group_id})
+                    row = mm.fetchone()
+                    facets[field_name] = {
+                        "type": ftype, "field": field_name,
+                        "min": row[0] if row else None,
+                        "max": row[1] if row else None,
+                    }
+
+                elif ftype == "unit":
+                    mm = await db.execute(text(
+                        "SELECT MIN(CAST(json_extract(data, :path) AS REAL)), "
+                        "MAX(CAST(json_extract(data, :path) AS REAL)) "
+                        "FROM items WHERE group_id = :gid "
+                        "AND json_extract(data, :path) IS NOT NULL"
+                    ), {"path": f"$.{field_name}.value", "gid": group_id})
+                    row = mm.fetchone()
+                    facets[field_name] = {
+                        "type": "unit", "field": field_name,
+                        "min": row[0] if row else None,
+                        "max": row[1] if row else None,
+                        "unit": field_def.get("default_unit", ""),
+                    }
+
+    # Collect tags with counts
+    tag_result = await db.execute(
+        select(ItemTag.tag, func.count(ItemTag.tag).label("cnt"))
+        .join(Item, Item.id == ItemTag.item_id)
+        .where(Item.group_id == group_id)
+        .group_by(ItemTag.tag)
+        .order_by(func.count(ItemTag.tag).desc())
+    )
+    tags = [{"tag": row[0], "count": row[1]} for row in tag_result.fetchall()]
+
+    return {"facets": facets, "tags": tags}

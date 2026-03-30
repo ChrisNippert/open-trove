@@ -1,0 +1,444 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '../api';
+import type { Group, Item } from '../types';
+
+interface FacetOption {
+  value: string;
+  count: number;
+}
+
+interface Facet {
+  type: string;
+  field: string;
+  options?: FacetOption[];
+  min?: number | null;
+  max?: number | null;
+  unit?: string;
+  true_count?: number;
+  false_count?: number;
+}
+
+interface TagFacet {
+  tag: string;
+  count: number;
+}
+
+export default function SearchPage() {
+  const [query, setQuery] = useState('');
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupFilter, setGroupFilter] = useState<number | ''>('');
+  const [results, setResults] = useState<Item[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Facets
+  const [facets, setFacets] = useState<Record<string, Facet>>({});
+  const [tags, setTags] = useState<TagFacet[]>([]);
+
+  // Filter state
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [checkboxFilters, setCheckboxFilters] = useState<Record<string, Set<string>>>({});
+  const [dropdownFilters, setDropdownFilters] = useState<Record<string, string>>({});
+  const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>({});
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+
+  // Debounce ref for range inputs
+  const rangeTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => { api.groups.list().then(setGroups); }, []);
+
+  // Load facets when group changes
+  useEffect(() => {
+    if (groupFilter) {
+      api.facets(groupFilter).then(data => {
+        setFacets(data.facets);
+        setTags(data.tags);
+      });
+    } else {
+      setFacets({});
+      setTags([]);
+    }
+    setSelectedTags(new Set());
+    setCheckboxFilters({});
+    setDropdownFilters({});
+    setRangeFilters({});
+  }, [groupFilter]);
+
+  const buildFilterArray = useCallback(() => {
+    const filters: { field: string; op: string; value: unknown }[] = [];
+    // Checkbox filters → IN operator (multiselect)
+    for (const [field, values] of Object.entries(checkboxFilters)) {
+      const arr = Array.from(values);
+      if (arr.length > 0) {
+        filters.push({ field, op: 'in', value: arr });
+      }
+    }
+    // Dropdown filters → exact match (single-select)
+    for (const [field, value] of Object.entries(dropdownFilters)) {
+      if (value) {
+        filters.push({ field, op: '=', value });
+      }
+    }
+    // Range filters → >= and <=
+    for (const [field, range] of Object.entries(rangeFilters)) {
+      const facet = facets[field];
+      const pathSuffix = facet?.type === 'unit' ? '.value' : '';
+      if (range.min) filters.push({ field: field + pathSuffix, op: '>=', value: parseFloat(range.min) });
+      if (range.max) filters.push({ field: field + pathSuffix, op: '<=', value: parseFloat(range.max) });
+    }
+    return filters;
+  }, [checkboxFilters, dropdownFilters, rangeFilters, facets]);
+
+  async function doSearch() {
+    setLoading(true);
+    try {
+      const filterArray = buildFilterArray();
+      const tagParam = Array.from(selectedTags).join(',');
+      const res = await api.search({
+        q: query.trim(),
+        group_id: groupFilter || undefined,
+        tag: tagParam || undefined,
+        filters: filterArray.length ? JSON.stringify(filterArray) : undefined,
+      });
+      setResults(res);
+      setSearched(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    doSearch();
+  }
+
+  // Toggle a tag checkbox
+  function toggleTag(tag: string) {
+    setSelectedTags(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag); else next.add(tag);
+      return next;
+    });
+  }
+
+  // Toggle a checkbox within a field facet
+  function toggleCheckbox(field: string, value: string) {
+    setCheckboxFilters(prev => {
+      const existing = prev[field] || new Set();
+      const next = new Set(existing);
+      if (next.has(value)) next.delete(value); else next.add(value);
+      return { ...prev, [field]: next };
+    });
+  }
+
+  // Update a range filter (with debounced search)
+  function updateRange(field: string, which: 'min' | 'max', val: string) {
+    setRangeFilters(prev => ({
+      ...prev,
+      [field]: { ...prev[field] || { min: '', max: '' }, [which]: val },
+    }));
+    // Debounce search for range inputs
+    if (rangeTimerRef.current) clearTimeout(rangeTimerRef.current);
+    rangeTimerRef.current = setTimeout(() => {
+      // Trigger search via effect
+      setRangeVersion(v => v + 1);
+    }, 600);
+  }
+
+  // Range version counter to trigger search after debounce
+  const [rangeVersion, setRangeVersion] = useState(0);
+
+  // Toggle section collapse
+  function toggleSection(name: string) {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  }
+
+  // Clear all filters
+  function clearAll() {
+    setSelectedTags(new Set());
+    setCheckboxFilters({});
+    setDropdownFilters({});
+    setRangeFilters({});
+  }
+
+  // Auto-search when filters change
+  useEffect(() => {
+    const hasTags = selectedTags.size > 0;
+    const hasCheckboxes = Object.values(checkboxFilters).some(s => s.size > 0);
+    const hasDropdowns = Object.values(dropdownFilters).some(v => v);
+    const hasRanges = Object.values(rangeFilters).some(r => r.min || r.max);
+    if (hasTags || hasCheckboxes || hasDropdowns || hasRanges || searched) {
+      doSearch();
+    }
+  }, [selectedTags, checkboxFilters, dropdownFilters, rangeVersion]);
+
+  function fieldDisplay(data: Record<string, unknown>) {
+    const entries = Object.entries(data).slice(0, 4);
+    return entries.map(([k, v]) => {
+      let display = '';
+      if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
+        const u = v as { value: number; unit: string };
+        display = `${u.value} ${u.unit}`;
+      } else if (Array.isArray(v)) {
+        display = v.join(', ');
+      } else {
+        const s = String(v ?? '');
+        display = s.length > 60 ? s.slice(0, 60) + '…' : s;
+      }
+      return (
+        <span key={k} className="text-xs text-stone-500 dark:text-stone-400">
+          <span className="text-stone-400 dark:text-stone-500">{k}:</span> {display}
+        </span>
+      );
+    });
+  }
+
+  const hasAnyFilter = selectedTags.size > 0
+    || Object.values(checkboxFilters).some(s => s.size > 0)
+    || Object.values(dropdownFilters).some(v => v)
+    || Object.values(rangeFilters).some(r => r.min || r.max);
+  const hasSidebar = Object.keys(facets).length > 0 || tags.length > 0;
+
+  return (
+    <div>
+      <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100 mb-6">Search</h1>
+
+      <form onSubmit={handleSearch} className="flex gap-2 mb-6">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search items, tags, fields..."
+          className="flex-1 px-4 py-2.5 border border-stone-300 dark:border-stone-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-400 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          autoFocus
+        />
+        <select
+          value={groupFilter}
+          onChange={e => setGroupFilter(e.target.value ? Number(e.target.value) : '')}
+          className="px-3 py-2.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+        >
+          <option value="">All Collections</option>
+          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+        <button type="submit" disabled={loading} className="px-5 py-2.5 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50">
+          {loading ? '...' : 'Search'}
+        </button>
+      </form>
+
+      <div className={`flex gap-6 ${hasSidebar ? '' : ''}`}>
+        {/* Sidebar filters */}
+        {hasSidebar && (
+          <aside className="w-60 shrink-0 space-y-1">
+            {/* Tags */}
+            {tags.length > 0 && (
+              <FilterSection title="Tags" collapsed={collapsedSections.has('_tags')} onToggle={() => toggleSection('_tags')}>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {tags.map(t => (
+                    <label key={t.tag} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-stone-50 dark:hover:bg-stone-800 cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={selectedTags.has(t.tag)}
+                        onChange={() => toggleTag(t.tag)}
+                        className="rounded border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-300 focus:ring-stone-400 w-3.5 h-3.5"
+                      />
+                      <span className="text-stone-600 dark:text-stone-300 flex-1 truncate">{t.tag}</span>
+                      <span className="text-stone-400 dark:text-stone-500 tabular-nums">{t.count}</span>
+                    </label>
+                  ))}
+                </div>
+              </FilterSection>
+            )}
+
+            {/* Field facets */}
+            {Object.entries(facets).map(([fieldName, facet]) => {
+              const sectionKey = `facet_${fieldName}`;
+              const collapsed = collapsedSections.has(sectionKey);
+
+              if (facet.type === 'dropdown') {
+                const opts = facet.options || [];
+                if (opts.length === 0) return null;
+                const selectedVal = dropdownFilters[fieldName] || '';
+                return (
+                  <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
+                    <select
+                      value={selectedVal}
+                      onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                    >
+                      <option value="">Any</option>
+                      {opts.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.value} ({opt.count})
+                        </option>
+                      ))}
+                    </select>
+                  </FilterSection>
+                );
+              }
+
+              if (facet.type === 'multiselect') {
+                const opts = facet.options || [];
+                if (opts.length === 0) return null;
+                const selected = checkboxFilters[fieldName] || new Set();
+                return (
+                  <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {opts.map(opt => (
+                        <label key={opt.value} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-stone-50 dark:hover:bg-stone-800 cursor-pointer text-xs">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(opt.value)}
+                            onChange={() => toggleCheckbox(fieldName, opt.value)}
+                            className="rounded border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-300 focus:ring-stone-400 w-3.5 h-3.5"
+                          />
+                          <span className="text-stone-600 dark:text-stone-300 flex-1 truncate">{opt.value}</span>
+                          <span className="text-stone-400 dark:text-stone-500 tabular-nums">{opt.count}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </FilterSection>
+                );
+              }
+
+              if (facet.type === 'boolean') {
+                const selected = checkboxFilters[fieldName] || new Set();
+                return (
+                  <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-stone-50 dark:hover:bg-stone-800 cursor-pointer text-xs">
+                        <input
+                          type="checkbox"
+                          checked={selected.has('true')}
+                          onChange={() => toggleCheckbox(fieldName, 'true')}
+                          className="rounded border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-300 focus:ring-stone-400 w-3.5 h-3.5"
+                        />
+                        <span className="text-stone-600 dark:text-stone-300 flex-1">Yes</span>
+                        <span className="text-stone-400 dark:text-stone-500 tabular-nums">{facet.true_count ?? 0}</span>
+                      </label>
+                      <label className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-stone-50 dark:hover:bg-stone-800 cursor-pointer text-xs">
+                        <input
+                          type="checkbox"
+                          checked={selected.has('false')}
+                          onChange={() => toggleCheckbox(fieldName, 'false')}
+                          className="rounded border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-300 focus:ring-stone-400 w-3.5 h-3.5"
+                        />
+                        <span className="text-stone-600 dark:text-stone-300 flex-1">No</span>
+                        <span className="text-stone-400 dark:text-stone-500 tabular-nums">{facet.false_count ?? 0}</span>
+                      </label>
+                    </div>
+                  </FilterSection>
+                );
+              }
+
+              if (facet.type === 'int' || facet.type === 'float' || facet.type === 'unit') {
+                const range = rangeFilters[fieldName] || { min: '', max: '' };
+                const unitLabel = facet.unit ? ` (${facet.unit})` : '';
+                return (
+                  <FilterSection key={fieldName} title={fieldName + unitLabel} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={range.min}
+                        onChange={e => updateRange(fieldName, 'min', e.target.value)}
+                        placeholder={facet.min != null ? String(facet.min) : 'Min'}
+                        className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                      />
+                      <span className="text-stone-400 text-xs">—</span>
+                      <input
+                        type="number"
+                        value={range.max}
+                        onChange={e => updateRange(fieldName, 'max', e.target.value)}
+                        placeholder={facet.max != null ? String(facet.max) : 'Max'}
+                        className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                      />
+                    </div>
+                    {facet.min != null && facet.max != null && (
+                      <p className="text-[10px] text-stone-400 dark:text-stone-500 mt-1">
+                        Range: {facet.min} – {facet.max}
+                      </p>
+                    )}
+                  </FilterSection>
+                );
+              }
+
+              return null;
+            })}
+
+            {/* Clear filters */}
+            {hasAnyFilter && (
+              <button
+                onClick={clearAll}
+                className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 underline mt-2"
+              >
+                Clear all filters
+              </button>
+            )}
+          </aside>
+        )}
+
+        {/* Results */}
+        <div className="flex-1">
+          {searched && results.length === 0 && (
+            <p className="text-stone-400 dark:text-stone-500 text-center py-12">No results found.</p>
+          )}
+
+          {results.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-stone-400 dark:text-stone-500 mb-3">{results.length} result{results.length === 1 ? '' : 's'}</p>
+              {results.map(item => (
+                <Link
+                  key={item.id}
+                  to={`/groups/${item.group_id}/items/${item.id}`}
+                  className="block bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 p-4 hover:border-stone-300 dark:hover:border-stone-600 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-stone-700 dark:text-stone-200">{item.name}</span>
+                      {item.tags && item.tags.length > 0 && (
+                        <div className="flex gap-1 mt-1">
+                          {item.tags.map(t => (
+                            <span key={t} className="text-xs bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded">{t}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-right">
+                      {fieldDisplay(item.data)}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Collapsible filter section ---- */
+function FilterSection({ title, collapsed, onToggle, children }: {
+  title: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-stone-200 dark:border-stone-700 pb-3 pt-2">
+      <button
+        onClick={onToggle}
+        className="flex items-center justify-between w-full text-left mb-2"
+      >
+        <h3 className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">
+          {title.replace(/_/g, ' ')}
+        </h3>
+        <span className="text-stone-400 dark:text-stone-500 text-[10px]">{collapsed ? '▸' : '▾'}</span>
+      </button>
+      {!collapsed && children}
+    </div>
+  );
+}
