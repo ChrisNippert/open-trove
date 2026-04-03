@@ -5,6 +5,109 @@ import type { Group, ItemSchema, Item } from '../types';
 import ItemCard from '../components/ItemCard';
 import CreateItemModal from '../components/CreateItemModal';
 
+const SCHEMA_TEMPLATES: { name: string; description: string; definition: object }[] = [
+  {
+    name: 'Book Collection',
+    description: 'Track books with author, genre, rating, and notes',
+    definition: {
+      sections: {
+        Details: {
+          title: { type: 'string' },
+          author: { type: 'string' },
+          genre: { type: 'dropdown', options: ['Fiction', 'Non-Fiction', 'Sci-Fi', 'Fantasy', 'Mystery', 'Biography', 'Self-Help', 'History'] },
+          isbn: { type: 'string' },
+        },
+        Status: {
+          rating: { type: 'dropdown', options: ['1', '2', '3', '4', '5'] },
+          read_status: { type: 'dropdown', options: ['Want to Read', 'Reading', 'Finished', 'Abandoned'] },
+          date_read: { type: 'datetime' },
+          notes: { type: 'textarea' },
+        },
+      },
+    },
+  },
+  {
+    name: 'Recipe',
+    description: 'Store recipes with ingredients, time, and instructions',
+    definition: {
+      sections: {
+        Overview: {
+          cuisine: { type: 'dropdown', options: ['Italian', 'Mexican', 'Chinese', 'Japanese', 'Indian', 'Thai', 'American', 'French', 'Other'] },
+          category: { type: 'dropdown', options: ['Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Snack', 'Drink'] },
+          servings: { type: 'int' },
+          prep_time_mins: { type: 'int' },
+          cook_time_mins: { type: 'int' },
+          difficulty: { type: 'dropdown', options: ['Easy', 'Medium', 'Hard'] },
+        },
+        Content: {
+          ingredients: { type: 'textarea' },
+          instructions: { type: 'textarea' },
+          notes: { type: 'textarea' },
+        },
+      },
+    },
+  },
+  {
+    name: 'Inventory',
+    description: 'General inventory tracking with quantity, price, and location',
+    definition: {
+      sections: {
+        Info: {
+          category: { type: 'dropdown', options: [] },
+          description: { type: 'textarea' },
+        },
+        Stock: {
+          quantity: { type: 'int' },
+          price: { type: 'unit', unit_category: 'currency', default_unit: 'USD' },
+          location: { type: 'string' },
+          condition: { type: 'dropdown', options: ['New', 'Like New', 'Good', 'Fair', 'Poor'] },
+        },
+      },
+    },
+  },
+  {
+    name: 'Clothing',
+    description: 'Wardrobe tracker with size, color, season, and brand',
+    definition: {
+      sections: {
+        Details: {
+          type: { type: 'dropdown', options: ['Top', 'Bottom', 'Outerwear', 'Dress', 'Shoes', 'Accessory', 'Underwear', 'Activewear'] },
+          brand: { type: 'string' },
+          color: { type: 'string' },
+          size: { type: 'string' },
+          material: { type: 'string' },
+        },
+        Meta: {
+          season: { type: 'multiselect', 'multiselect-items': ['Spring', 'Summer', 'Fall', 'Winter'] },
+          occasion: { type: 'multiselect', 'multiselect-items': ['Casual', 'Work', 'Formal', 'Sport', 'Lounge'] },
+          purchased: { type: 'datetime' },
+          notes: { type: 'textarea' },
+        },
+      },
+    },
+  },
+  {
+    name: 'Board Games',
+    description: 'Board game collection with player count, playtime, and ratings',
+    definition: {
+      sections: {
+        Info: {
+          min_players: { type: 'int' },
+          max_players: { type: 'int' },
+          playtime_mins: { type: 'int' },
+          complexity: { type: 'dropdown', options: ['Light', 'Medium-Light', 'Medium', 'Medium-Heavy', 'Heavy'] },
+          category: { type: 'multiselect', 'multiselect-items': ['Strategy', 'Party', 'Cooperative', 'Deck-Building', 'Worker Placement', 'Dice', 'Trivia', 'Family'] },
+        },
+        Personal: {
+          rating: { type: 'dropdown', options: ['1', '2', '3', '4', '5'] },
+          times_played: { type: 'int' },
+          notes: { type: 'textarea' },
+        },
+      },
+    },
+  },
+];
+
 export default function GroupDetailPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const gid = Number(groupId);
@@ -19,6 +122,11 @@ export default function GroupDetailPage() {
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [showCreateSchema, setShowCreateSchema] = useState(false);
   const [newSchemaName, setNewSchemaName] = useState('');
+  const [importSchemaId, setImportSchemaId] = useState<number | null>(null);
+  const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
+  const [schemaJsonImport, setSchemaJsonImport] = useState(false);
+  const [schemaJsonText, setSchemaJsonText] = useState('');
+  const [schemaJsonError, setSchemaJsonError] = useState('');
 
   useEffect(() => {
     loadData();
@@ -60,10 +168,97 @@ export default function GroupDetailPage() {
     setSchemas(prev => [...prev, s]);
   }
 
+  async function handleCreateFromTemplate(tmpl: typeof SCHEMA_TEMPLATES[number]) {
+    const s = await api.schemas.create(gid, {
+      name: tmpl.name,
+      definition: tmpl.definition,
+    });
+    setShowCreateSchema(false);
+    setSchemas(prev => [...prev, s]);
+  }
+
+  async function handleCreateFromJson() {
+    setSchemaJsonError('');
+    try {
+      const parsed = JSON.parse(schemaJsonText);
+      let def: object;
+      let schemaName = newSchemaName.trim() || 'Imported Schema';
+      if (parsed.sections && typeof parsed.sections === 'object') {
+        def = parsed;
+      } else if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+        def = { sections: parsed };
+      } else {
+        setSchemaJsonError('JSON must be an object with a "sections" key, or a sections object directly.');
+        return;
+      }
+      const s = await api.schemas.create(gid, { name: schemaName, definition: def });
+      setSchemas(prev => [...prev, s]);
+      setSchemaJsonImport(false);
+      setSchemaJsonText('');
+      setShowCreateSchema(false);
+    } catch {
+      setSchemaJsonError('Invalid JSON');
+    }
+  }
+
   async function handleDeleteItem(itemId: number) {
     if (!confirm('Delete this item?')) return;
     await api.items.delete(gid, itemId);
     setItems(prev => prev.filter(i => i.id !== itemId));
+  }
+
+  function handleImportClick() {
+    if (schemas.length === 0) return;
+    if (schemas.length === 1) {
+      setImportSchemaId(schemas[0].id);
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.csv';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const sid = schemas.length === 1 ? schemas[0].id : importSchemaId;
+      if (!sid) {
+        // Show schema picker - need to pick a schema first
+        setImportSchemaId(-1); // signal to show picker
+        input.remove();
+        return;
+      }
+      try {
+        const result = file.name.endsWith('.csv')
+          ? await api.export.importCsv(gid, sid, file)
+          : await api.export.importJson(gid, sid, file);
+        setImportResult(result);
+        loadItems();
+      } catch {
+        setImportResult({ imported: 0, errors: ['Import failed'] });
+      }
+      input.remove();
+    };
+    input.click();
+  }
+
+  async function handleImportWithSchema(schemaId: number) {
+    setImportSchemaId(null);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.csv';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const result = file.name.endsWith('.csv')
+          ? await api.export.importCsv(gid, schemaId, file)
+          : await api.export.importJson(gid, schemaId, file);
+        setImportResult(result);
+        loadItems();
+      } catch {
+        setImportResult({ imported: 0, errors: ['Import failed'] });
+      }
+      input.remove();
+    };
+    input.click();
   }
 
   if (loading) {
@@ -84,9 +279,43 @@ export default function GroupDetailPage() {
       </div>
 
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100">{group.name}</h1>
-          {group.description && <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">{group.description}</p>}
+        <div className="flex items-center gap-4">
+          <div className="relative group/thumb">
+            {group.thumbnail ? (
+              <img
+                src={api.groups.thumbnailUrl(gid)}
+                alt=""
+                className="w-14 h-14 rounded-lg object-cover border border-stone-200 dark:border-stone-700"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 flex items-center justify-center text-stone-300 dark:text-stone-600">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = async () => {
+                  const file = input.files?.[0];
+                  if (!file) return;
+                  const updated = await api.groups.uploadThumbnail(gid, file);
+                  setGroup(prev => prev ? { ...prev, thumbnail: updated.thumbnail } : prev);
+                };
+                input.click();
+              }}
+              className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg opacity-0 group-hover/thumb:opacity-100 transition-opacity text-white text-xs"
+            >
+              {group.thumbnail ? '✎' : '+'}
+            </button>
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100">{group.name}</h1>
+            {group.description && <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">{group.description}</p>}
+          </div>
         </div>
         <div className="flex gap-2">
           <a
@@ -95,6 +324,37 @@ export default function GroupDetailPage() {
           >
             Export JSON
           </a>
+          {schemas.length === 1 ? (
+            <button
+              onClick={handleImportClick}
+              className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+            >
+              Import
+            </button>
+          ) : schemas.length > 1 ? (
+            <div className="relative">
+              <button
+                onClick={() => setImportSchemaId(importSchemaId === -1 ? null : -1)}
+                className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+              >
+                Import ▾
+              </button>
+              {importSchemaId === -1 && (
+                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg z-10 min-w-[160px]">
+                  <div className="px-3 py-2 text-xs text-stone-400 dark:text-stone-500 border-b border-stone-100 dark:border-stone-700">Import into schema:</div>
+                  {schemas.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => { setImportSchemaId(null); handleImportWithSchema(s.id); }}
+                      className="block w-full text-left px-3 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700"
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
           <button
             onClick={() => setShowCreateItem(true)}
             className="px-4 py-2 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300"
@@ -118,18 +378,62 @@ export default function GroupDetailPage() {
         </div>
 
         {showCreateSchema && (
-          <form onSubmit={handleCreateSchema} className="flex gap-2 mb-3">
-            <input
-              value={newSchemaName}
-              onChange={e => setNewSchemaName(e.target.value)}
-              className="flex-1 px-3 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-stone-400 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
-              placeholder="Schema name (e.g. ClothingItem)"
-              autoFocus
-            />
-            <button type="submit" className="px-3 py-1.5 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm">
-              Create
-            </button>
-          </form>
+          <div className="mb-4 space-y-3">
+            {/* Create blank */}
+            <form onSubmit={handleCreateSchema} className="flex gap-2">
+              <input
+                value={newSchemaName}
+                onChange={e => setNewSchemaName(e.target.value)}
+                className="flex-1 px-3 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-stone-400 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+                placeholder="Schema name (e.g. ClothingItem)"
+                autoFocus
+              />
+              <button type="submit" className="px-3 py-1.5 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm">
+                Create Blank
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSchemaJsonImport(!schemaJsonImport); setSchemaJsonError(''); }}
+                className="px-3 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+              >
+                Paste JSON
+              </button>
+            </form>
+
+            {/* JSON import */}
+            {schemaJsonImport && (
+              <div className="bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
+                <textarea
+                  value={schemaJsonText}
+                  onChange={e => { setSchemaJsonText(e.target.value); setSchemaJsonError(''); }}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-xs font-mono bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 mb-2"
+                  placeholder='Paste schema JSON here...'
+                />
+                {schemaJsonError && <p className="text-xs text-red-500 mb-2">{schemaJsonError}</p>}
+                <button onClick={handleCreateFromJson} className="px-3 py-1.5 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm">
+                  Create from JSON
+                </button>
+              </div>
+            )}
+
+            {/* Templates */}
+            <div>
+              <p className="text-xs text-stone-400 dark:text-stone-500 mb-2">Or start from a template:</p>
+              <div className="grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+                {SCHEMA_TEMPLATES.map(tmpl => (
+                  <button
+                    key={tmpl.name}
+                    onClick={() => handleCreateFromTemplate(tmpl)}
+                    className="text-left p-3 bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-500 transition-colors"
+                  >
+                    <div className="text-sm font-medium text-stone-700 dark:text-stone-200">{tmpl.name}</div>
+                    <div className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">{tmpl.description}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
 
         <div className="flex flex-wrap gap-2">
@@ -185,6 +489,17 @@ export default function GroupDetailPage() {
         </button>
         <span className="text-sm text-stone-400 dark:text-stone-500 ml-2">{items.length} items</span>
       </div>
+
+      {/* Import result banner */}
+      {importResult && (
+        <div className={`mb-4 px-4 py-3 rounded-lg text-sm flex items-center justify-between ${importResult.errors.length > 0 ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300' : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'}`}>
+          <div>
+            Imported {importResult.imported} item{importResult.imported !== 1 ? 's' : ''}.
+            {importResult.errors.length > 0 && ` ${importResult.errors.length} error${importResult.errors.length !== 1 ? 's' : ''}: ${importResult.errors.slice(0, 3).join('; ')}`}
+          </div>
+          <button onClick={() => setImportResult(null)} className="ml-2 opacity-60 hover:opacity-100">&times;</button>
+        </div>
+      )}
 
       {/* Items */}
       {items.length === 0 ? (

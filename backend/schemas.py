@@ -17,6 +17,7 @@ class GroupOut(BaseModel):
     id: int
     name: str
     description: str
+    thumbnail: str | None = None
     created_at: datetime
     updated_at: datetime
     schema_count: int = 0

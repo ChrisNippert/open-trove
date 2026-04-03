@@ -16,11 +16,17 @@ async def export_as_json(
     group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    filename = "export.json"
+    if group_id is not None:
+        group = await db.get(Group, group_id)
+        if group:
+            safe_name = group.name.replace('"', '').replace('/', '_').replace('\\', '_')
+            filename = f"{safe_name}.json"
     data = await export_json(db, group_id)
     return Response(
         content=json.dumps(data, indent=2, default=str),
         media_type="application/json",
-        headers={"Content-Disposition": "attachment; filename=export.json"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -33,10 +39,20 @@ async def export_as_csv(
     content = await export_csv(db, group_id, schema_id)
     if not content:
         raise HTTPException(404, "No data found for this group/schema")
+    filename = "export.csv"
+    group = await db.get(Group, group_id)
+    schema = await db.get(ItemSchema, schema_id)
+    parts = []
+    if group:
+        parts.append(group.name.replace('"', '').replace('/', '_').replace('\\', '_'))
+    if schema:
+        parts.append(schema.name.replace('"', '').replace('/', '_').replace('\\', '_'))
+    if parts:
+        filename = f"{' - '.join(parts)}.csv"
     return Response(
         content=content,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=export.csv"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import type { ItemSchema, SchemaDefinition, FieldDef } from '../types';
+import type { ItemSchema, SchemaDefinition, FieldDef, Group } from '../types';
 
 const FIELD_TYPES = [
   'string', 'textarea', 'int', 'float', 'boolean', 'datetime',
-  'dropdown', 'multiselect', 'unit', 'computed', 'image',
+  'dropdown', 'multiselect', 'unit', 'computed', 'image', 'link',
 ];
 
 const UNIT_CATEGORIES = ['mass', 'volume', 'length', 'currency', 'count'];
@@ -35,9 +35,15 @@ export default function SchemaEditorPage() {
   const [newFieldSection, setNewFieldSection] = useState<string | null>(null);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('string');
+  const [showJsonImport, setShowJsonImport] = useState(false);
+  const [jsonImportText, setJsonImportText] = useState('');
+  const [jsonError, setJsonError] = useState('');
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  const [allSchemas, setAllSchemas] = useState<Record<number, ItemSchema[]>>({});
 
   useEffect(() => {
     loadSchema();
+    api.groups.list().then(setAllGroups);
   }, [gid, sid]);
 
   async function loadSchema() {
@@ -134,6 +140,17 @@ export default function SchemaEditorPage() {
     });
   }
 
+  function reorderField(sectionName: string, fromIdx: number, toIdx: number) {
+    setDefinition(prev => {
+      const entries = Object.entries(prev.sections[sectionName]);
+      const [moved] = entries.splice(fromIdx, 1);
+      entries.splice(toIdx, 0, moved);
+      const reordered: Record<string, FieldDef> = {};
+      for (const [k, v] of entries) reordered[k] = v;
+      return { ...prev, sections: { ...prev.sections, [sectionName]: reordered } };
+    });
+  }
+
   function updateField(sectionName: string, fieldName: string, key: string, value: unknown) {
     setDefinition(prev => ({
       ...prev,
@@ -199,6 +216,24 @@ export default function SchemaEditorPage() {
           className="text-2xl font-semibold text-stone-800 dark:text-stone-100 bg-transparent border-b border-transparent hover:border-stone-300 dark:hover:border-stone-600 focus:border-stone-400 dark:focus:border-stone-500 focus:outline-none"
         />
         <div className="flex gap-2">
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(JSON.stringify(definition, null, 2));
+              const btn = document.activeElement as HTMLButtonElement;
+              const orig = btn.textContent;
+              btn.textContent = 'Copied!';
+              setTimeout(() => { btn.textContent = orig; }, 1500);
+            }}
+            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+          >
+            Copy JSON
+          </button>
+          <button
+            onClick={() => { setJsonImportText(''); setJsonError(''); setShowJsonImport(true); }}
+            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+          >
+            Import JSON
+          </button>
           <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50">
             {saving ? 'Saving...' : 'Save Schema'}
           </button>
@@ -207,6 +242,52 @@ export default function SchemaEditorPage() {
           </button>
         </div>
       </div>
+
+      {/* JSON Import Modal */}
+      {showJsonImport && (
+        <div className="fixed inset-0 bg-black/30 dark:bg-black/50 z-50 flex items-center justify-center px-4">
+          <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 w-full max-w-lg shadow-xl p-5">
+            <h2 className="text-lg font-semibold text-stone-800 dark:text-stone-100 mb-3">Import Schema JSON</h2>
+            <p className="text-sm text-stone-500 dark:text-stone-400 mb-3">Paste a schema definition JSON. This will replace the current definition.</p>
+            <textarea
+              value={jsonImportText}
+              onChange={e => { setJsonImportText(e.target.value); setJsonError(''); }}
+              rows={12}
+              className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm font-mono bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+              placeholder='{"sections": {"General": {"name": {"type": "string"}, ...}}}'
+              autoFocus
+            />
+            {jsonError && <p className="text-sm text-red-500 mt-2">{jsonError}</p>}
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => {
+                  try {
+                    const parsed = JSON.parse(jsonImportText);
+                    if (parsed.sections && typeof parsed.sections === 'object') {
+                      setDefinition(parsed);
+                    } else if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+                      // Assume it's the sections object directly
+                      setDefinition({ sections: parsed });
+                    } else {
+                      setJsonError('JSON must be an object with a "sections" key, or a sections object directly.');
+                      return;
+                    }
+                    setShowJsonImport(false);
+                  } catch {
+                    setJsonError('Invalid JSON. Please check your syntax.');
+                  }
+                }}
+                className="px-4 py-2 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300"
+              >
+                Apply
+              </button>
+              <button onClick={() => setShowJsonImport(false)} className="px-4 py-2 text-stone-500 dark:text-stone-400 text-sm">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sections */}
       <div className="space-y-4">
@@ -218,6 +299,7 @@ export default function SchemaEditorPage() {
             isAddingField={newFieldSection === sectionName}
             newFieldName={newFieldName}
             newFieldType={newFieldType}
+            allGroups={allGroups}
             onNewFieldNameChange={setNewFieldName}
             onNewFieldTypeChange={setNewFieldType}
             onStartAddField={() => setNewFieldSection(sectionName)}
@@ -229,6 +311,7 @@ export default function SchemaEditorPage() {
             onUpdateField={(f, k, v) => updateField(sectionName, f, k, v)}
             onRemoveField={(f) => removeField(sectionName, f)}
             onChangeFieldType={(f, newType) => changeFieldType(sectionName, f, newType)}
+            onReorderField={(from, to) => reorderField(sectionName, from, to)}
           />
         ))}
       </div>
@@ -260,12 +343,13 @@ export default function SchemaEditorPage() {
 
 /* ---- Section Editor ---- */
 
-function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType, onNewFieldNameChange, onNewFieldTypeChange, onStartAddField, onCancelAddField, onAddField, onRenameSection, onRemoveSection, onRenameField, onUpdateField, onRemoveField, onChangeFieldType }: {
+function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType, allGroups, onNewFieldNameChange, onNewFieldTypeChange, onStartAddField, onCancelAddField, onAddField, onRenameSection, onRemoveSection, onRenameField, onUpdateField, onRemoveField, onChangeFieldType, onReorderField }: {
   name: string;
   fields: Record<string, FieldDef>;
   isAddingField: boolean;
   newFieldName: string;
   newFieldType: string;
+  allGroups: Group[];
   onNewFieldNameChange: (v: string) => void;
   onNewFieldTypeChange: (v: string) => void;
   onStartAddField: () => void;
@@ -277,9 +361,12 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
   onUpdateField: (field: string, key: string, value: unknown) => void;
   onRemoveField: (field: string) => void;
   onChangeFieldType: (field: string, newType: string) => void;
+  onReorderField: (fromIdx: number, toIdx: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(name);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   function commitRename() {
     if (editName.trim() && editName !== name) onRenameSection(editName.trim());
@@ -313,16 +400,31 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
       </div>
 
       <div className="space-y-2">
-        {Object.entries(fields).map(([fieldName, fieldDef]) => (
-          <FieldDefEditor
+        {Object.entries(fields).map(([fieldName, fieldDef], idx) => (
+          <div
             key={fieldName}
-            name={fieldName}
-            def={fieldDef}
-            onRename={(n) => onRenameField(fieldName, n)}
-            onUpdate={(key, val) => onUpdateField(fieldName, key, val)}
-            onRemove={() => onRemoveField(fieldName)}
-            onChangeType={(newType) => onChangeFieldType(fieldName, newType)}
-          />
+            draggable
+            onDragStart={() => setDragIdx(idx)}
+            onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }}
+            onDragLeave={() => setDragOverIdx(null)}
+            onDrop={() => {
+              if (dragIdx !== null && dragIdx !== idx) onReorderField(dragIdx, idx);
+              setDragIdx(null);
+              setDragOverIdx(null);
+            }}
+            onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+            className={`transition-all ${dragOverIdx === idx ? 'border-t-2 border-stone-400 dark:border-stone-500' : ''} ${dragIdx === idx ? 'opacity-40' : ''}`}
+          >
+            <FieldDefEditor
+              name={fieldName}
+              def={fieldDef}
+              allGroups={allGroups}
+              onRename={(n) => onRenameField(fieldName, n)}
+              onUpdate={(key, val) => onUpdateField(fieldName, key, val)}
+              onRemove={() => onRemoveField(fieldName)}
+              onChangeType={(newType) => onChangeFieldType(fieldName, newType)}
+            />
+          </div>
         ))}
       </div>
 
@@ -357,9 +459,10 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
 
 /* ---- Field Editor ---- */
 
-function FieldDefEditor({ name, def, onRename, onUpdate, onRemove, onChangeType }: {
+function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, onChangeType }: {
   name: string;
   def: FieldDef;
+  allGroups: Group[];
   onRename: (newName: string) => void;
   onUpdate: (key: string, value: unknown) => void;
   onRemove: () => void;
@@ -370,7 +473,7 @@ function FieldDefEditor({ name, def, onRename, onUpdate, onRemove, onChangeType 
   const [expanded, setExpanded] = useState(false);
 
   // Does this type have configurable options?
-  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed'].includes(def.type);
+  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link'].includes(def.type);
 
   // Auto-expand options panel when switching to a configurable type
   useEffect(() => {
@@ -385,6 +488,8 @@ function FieldDefEditor({ name, def, onRename, onUpdate, onRemove, onChangeType 
   return (
     <div className="p-3 bg-stone-50 dark:bg-stone-750 dark:bg-stone-900/40 rounded-lg">
       <div className="flex items-center gap-2">
+        {/* Drag handle */}
+        <span className="cursor-grab active:cursor-grabbing text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400 select-none" title="Drag to reorder">⠿</span>
         {/* Editable field name */}
         {editingName ? (
           <input
@@ -444,25 +549,17 @@ function FieldDefEditor({ name, def, onRename, onUpdate, onRemove, onChangeType 
       {expanded && (
         <div className="mt-2 pt-2 border-t border-stone-200 dark:border-stone-700 space-y-2 text-xs">
           {(def.type === 'dropdown') && (
-            <div>
-              <label className="text-stone-500 dark:text-stone-400">Options (comma-separated)</label>
-              <input
-                value={(def.options || def['dropdown-items'] || []).join(', ')}
-                onChange={e => onUpdate('options', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
-              />
-            </div>
+            <OptionsInput
+              value={def.options || def['dropdown-items'] || []}
+              onChange={v => onUpdate('options', v)}
+            />
           )}
 
           {(def.type === 'multiselect') && (
-            <div>
-              <label className="text-stone-500 dark:text-stone-400">Options (comma-separated)</label>
-              <input
-                value={(def['multiselect-items'] || []).join(', ')}
-                onChange={e => onUpdate('multiselect-items', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-                className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
-              />
-            </div>
+            <OptionsInput
+              value={def['multiselect-items'] || []}
+              onChange={v => onUpdate('multiselect-items', v)}
+            />
           )}
 
           {def.type === 'unit' && (
@@ -509,8 +606,94 @@ function FieldDefEditor({ name, def, onRename, onUpdate, onRemove, onChangeType 
               </div>
             </div>
           )}
+
+          {def.type === 'link' && (
+            <LinkFieldConfig def={def} allGroups={allGroups} onUpdate={onUpdate} />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---- Link Field Config ---- */
+
+function LinkFieldConfig({ def, allGroups, onUpdate }: {
+  def: FieldDef;
+  allGroups: Group[];
+  onUpdate: (key: string, value: unknown) => void;
+}) {
+  const [schemas, setSchemas] = useState<ItemSchema[]>([]);
+
+  useEffect(() => {
+    if (def.link_group_id) {
+      api.schemas.list(def.link_group_id).then(setSchemas);
+    } else {
+      setSchemas([]);
+    }
+  }, [def.link_group_id]);
+
+  return (
+    <div className="flex gap-3">
+      <div className="flex-1">
+        <label className="text-stone-500 dark:text-stone-400">Link to collection</label>
+        <select
+          value={def.link_group_id || ''}
+          onChange={e => {
+            const gid = e.target.value ? Number(e.target.value) : undefined;
+            onUpdate('link_group_id', gid);
+            onUpdate('link_schema_id', undefined);
+          }}
+          className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+        >
+          <option value="">Any collection</option>
+          {allGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+      </div>
+      {def.link_group_id && schemas.length > 0 && (
+        <div className="flex-1">
+          <label className="text-stone-500 dark:text-stone-400">Limit to schema</label>
+          <select
+            value={def.link_schema_id || ''}
+            onChange={e => onUpdate('link_schema_id', e.target.value ? Number(e.target.value) : undefined)}
+            className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          >
+            <option value="">Any schema</option>
+            {schemas.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- Options Input (local buffer, commits on blur) ---- */
+
+function OptionsInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [text, setText] = useState(value.join(', '));
+  const [focused, setFocused] = useState(false);
+
+  // Sync from parent when not focused
+  useEffect(() => {
+    if (!focused) setText(value.join(', '));
+  }, [value, focused]);
+
+  function commit() {
+    onChange(text.split(',').map(s => s.trim()).filter(Boolean));
+    setFocused(false);
+  }
+
+  return (
+    <div>
+      <label className="text-stone-500 dark:text-stone-400">Options (comma-separated)</label>
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
+        className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+      />
     </div>
   );
 }

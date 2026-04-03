@@ -12,6 +12,7 @@ class Group(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False, unique=True)
     description = Column(Text, default="")
+    thumbnail = Column(String(512), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

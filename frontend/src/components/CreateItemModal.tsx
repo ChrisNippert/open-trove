@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { api } from '../api';
-import type { ItemSchema, FieldDef } from '../types';
+import type { Item, ItemSchema, FieldDef } from '../types';
 
 interface Props {
   groupId: number;
@@ -16,6 +16,7 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [namedImageFiles, setNamedImageFiles] = useState<Record<string, File>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
 
@@ -37,7 +38,19 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
         data: formData,
         tags: tagList,
       });
-      // Upload images
+      // Upload named image fields and collect their IDs
+      const namedImageData: Record<string, number> = {};
+      for (const [fieldName, file] of Object.entries(namedImageFiles)) {
+        const img = await api.images.upload(item.id, file);
+        namedImageData[fieldName] = img.id;
+      }
+      // Update item data with image IDs if any
+      if (Object.keys(namedImageData).length > 0) {
+        await api.items.update(groupId, item.id, {
+          data: { ...formData, ...namedImageData },
+        });
+      }
+      // Upload general images
       for (const file of imageFiles) {
         await api.images.upload(item.id, file);
       }
@@ -109,6 +122,13 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
                     def={fieldDef as FieldDef}
                     value={formData[fieldName]}
                     onChange={val => setField(fieldName, val)}
+                    namedImageFile={namedImageFiles[fieldName] || null}
+                    onImageFile={file => setNamedImageFiles(prev => {
+                      const next = { ...prev };
+                      if (file) next[fieldName] = file;
+                      else delete next[fieldName];
+                      return next;
+                    })}
                   />
                 ))}
               </div>
@@ -186,13 +206,16 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
   );
 }
 
-function FieldInput({ name, def, value, onChange }: {
+function FieldInput({ name, def, value, onChange, namedImageFile, onImageFile }: {
   name: string;
   def: FieldDef;
   value: unknown;
   onChange: (val: unknown) => void;
+  namedImageFile: File | null;
+  onImageFile: (file: File | null) => void;
 }) {
   const label = name.charAt(0).toUpperCase() + name.slice(1);
+  const imgRef = useRef<HTMLInputElement>(null);
 
   if (def.type === 'computed') {
     return (
@@ -207,7 +230,45 @@ function FieldInput({ name, def, value, onChange }: {
     );
   }
 
-  if (def.type === 'image') return null; // handled separately
+  if (def.type === 'image') {
+    return (
+      <div className="sm:col-span-2">
+        <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+        {namedImageFile ? (
+          <div className="relative w-32 h-32 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800">
+            <img src={URL.createObjectURL(namedImageFile)} className="w-full h-full object-cover" alt={label} />
+            <button
+              type="button"
+              onClick={() => onImageFile(null)}
+              className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center hover:bg-red-600"
+            >
+              &times;
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => imgRef.current?.click()}
+            className="w-32 h-32 rounded-lg border-2 border-dashed border-stone-300 dark:border-stone-600 flex flex-col items-center justify-center text-stone-400 dark:text-stone-500 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-500 dark:hover:text-stone-400"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            <span className="text-xs">Add image</span>
+          </button>
+        )}
+        <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) onImageFile(f);
+          e.target.value = '';
+        }} />
+      </div>
+    );
+  }
+
+  if (def.type === 'link') {
+    return <LinkFieldInput name={name} def={def} value={value} onChange={onChange} />;
+  }
 
   if (def.type === 'dropdown') {
     const options = def.options || def['dropdown-items'] || [];
@@ -346,6 +407,65 @@ function FieldInput({ name, def, value, onChange }: {
         className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
         required={def.required}
       />
+    </div>
+  );
+}
+
+function LinkFieldInput({ name, def, value, onChange }: {
+  name: string;
+  def: FieldDef;
+  value: unknown;
+  onChange: (val: unknown) => void;
+}) {
+  const label = name.charAt(0).toUpperCase() + name.slice(1);
+  const [items, setItems] = useState<Item[]>([]);
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const linked = value as { id: number; name: string } | null;
+
+  useEffect(() => {
+    if (!def.link_group_id) return;
+    api.items.list(def.link_group_id, { schema_id: def.link_schema_id, limit: 200 }).then(setItems);
+  }, [def.link_group_id, def.link_schema_id]);
+
+  const filtered = items.filter(it =>
+    it.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+      {linked ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-stone-700 dark:text-stone-200">{linked.name}</span>
+          <button type="button" onClick={() => onChange(null)} className="text-xs text-stone-400 hover:text-red-400">&times;</button>
+        </div>
+      ) : (
+        <div className="relative">
+          <input
+            value={search}
+            onChange={e => { setSearch(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            placeholder={def.link_group_id ? 'Search items...' : 'Configure link target in schema first'}
+            disabled={!def.link_group_id}
+            className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          />
+          {open && filtered.length > 0 && (
+            <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+              {filtered.map(it => (
+                <button
+                  key={it.id}
+                  type="button"
+                  onClick={() => { onChange({ id: it.id, name: it.name }); setSearch(''); setOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200"
+                >
+                  {it.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

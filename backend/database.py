@@ -20,3 +20,14 @@ async def get_db() -> AsyncSession:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate: add thumbnail column to groups if missing
+        result = await conn.execute(
+            __import__('sqlalchemy').text("PRAGMA table_info(groups)")
+        )
+        columns = [row[1] for row in result.fetchall()]
+        if "thumbnail" not in columns:
+            await conn.execute(
+                __import__('sqlalchemy').text(
+                    "ALTER TABLE groups ADD COLUMN thumbnail VARCHAR(512)"
+                )
+            )

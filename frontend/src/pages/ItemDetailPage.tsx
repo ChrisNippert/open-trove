@@ -207,7 +207,25 @@ export default function ItemDetailPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 {Object.entries(fields).map(([fieldName, fieldDef]) => {
                   const fd = fieldDef as FieldDef;
-                  if (fd.type === 'image') return null;
+                  if (fd.type === 'image') {
+                    const imageId = (editing ? formData[fieldName] : item.data[fieldName]) as number | undefined;
+                    return (
+                      <div key={fieldName} className="sm:col-span-2">
+                        <label className="block text-xs text-stone-400 dark:text-stone-500 mb-1">{fieldName}</label>
+                        <NamedImageField
+                          itemId={iid}
+                          imageId={imageId || null}
+                          editing={editing}
+                          onUploaded={(imgId) => {
+                            setFormData(prev => ({ ...prev, [fieldName]: imgId }));
+                          }}
+                          onRemoved={() => {
+                            setFormData(prev => ({ ...prev, [fieldName]: null }));
+                          }}
+                        />
+                      </div>
+                    );
+                  }
                   const val = editing ? formData[fieldName] : item.data[fieldName];
                   const isWide = fd.type === 'textarea';
                   return (
@@ -220,6 +238,13 @@ export default function ItemDetailPage() {
                           value={formData[fieldName]}
                           onChange={v => setFormData(prev => ({ ...prev, [fieldName]: v }))}
                         />
+                      ) : fd.type === 'link' && val && typeof val === 'object' && 'id' in (val as Record<string, unknown>) ? (
+                        <Link
+                          to={`/groups/${(fd as FieldDef).link_group_id || gid}/items/${(val as { id: number }).id}`}
+                          className="text-sm text-stone-600 dark:text-stone-300 underline hover:text-stone-900 dark:hover:text-white"
+                        >
+                          {(val as { name: string }).name}
+                        </Link>
                       ) : (
                         <div className={`text-sm text-stone-800 dark:text-stone-200 ${fd.type === 'textarea' ? 'whitespace-pre-wrap' : ''}`}>
                           {formatDisplay(val)}
@@ -238,6 +263,78 @@ export default function ItemDetailPage() {
         Created: {new Date(item.created_at).toLocaleString()} &middot; Updated: {new Date(item.updated_at).toLocaleString()}
       </div>
     </div>
+  );
+}
+
+function NamedImageField({ itemId, imageId, editing, onUploaded, onRemoved }: {
+  itemId: number;
+  imageId: number | null;
+  editing: boolean;
+  onUploaded: (imageId: number) => void;
+  onRemoved: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(file: File) {
+    const img = await api.images.upload(itemId, file);
+    onUploaded(img.id);
+  }
+
+  if (imageId) {
+    return (
+      <div className="relative w-40 h-40 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group">
+        <img src={api.images.url(itemId, imageId)} className="w-full h-full object-cover" alt="" />
+        {editing && (
+          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-1 right-1 flex gap-1">
+              <button
+                onClick={() => ref.current?.click()}
+                className="bg-black/50 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center hover:bg-black/70"
+                title="Replace"
+              >
+                ↻
+              </button>
+              <button
+                onClick={onRemoved}
+                className="bg-black/50 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center hover:bg-red-600"
+                title="Remove"
+              >
+                &times;
+              </button>
+            </div>
+          </div>
+        )}
+        <input ref={ref} type="file" accept="image/*" className="hidden" onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) handleUpload(f);
+          e.target.value = '';
+        }} />
+      </div>
+    );
+  }
+
+  if (!editing) {
+    return <span className="text-sm text-stone-400 dark:text-stone-500">—</span>;
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => ref.current?.click()}
+        className="w-40 h-40 rounded-lg border-2 border-dashed border-stone-300 dark:border-stone-600 flex flex-col items-center justify-center text-stone-400 dark:text-stone-500 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-500 dark:hover:text-stone-400"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+        <span className="text-xs">Add image</span>
+      </button>
+      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={e => {
+        const f = e.target.files?.[0];
+        if (f) handleUpload(f);
+        e.target.value = '';
+      }} />
+    </>
   );
 }
 
@@ -291,13 +388,75 @@ function EditableField({ name, def, value, onChange }: {
   if (def.type === 'textarea') {
     return <textarea value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} rows={6} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 font-mono sm:col-span-2" />;
   }
+  if (def.type === 'link') {
+    return <LinkFieldEdit def={def} value={value} onChange={onChange} />;
+  }
   return <input value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
+}
+
+function LinkFieldEdit({ def, value, onChange }: {
+  def: FieldDef;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const [items, setItems] = useState<Item[]>([]);
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const linked = value as { id: number; name: string } | null;
+
+  useEffect(() => {
+    if (!def.link_group_id) return;
+    api.items.list(def.link_group_id, { schema_id: def.link_schema_id, limit: 200 }).then(setItems);
+  }, [def.link_group_id, def.link_schema_id]);
+
+  const filtered = items.filter(it =>
+    it.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (linked) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-stone-700 dark:text-stone-200">{linked.name}</span>
+        <button type="button" onClick={() => onChange(null)} className="text-xs text-stone-400 hover:text-red-400">&times;</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <input
+        value={search}
+        onChange={e => { setSearch(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={def.link_group_id ? 'Search items...' : 'Configure link target in schema'}
+        disabled={!def.link_group_id}
+        className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {filtered.map(it => (
+            <button
+              key={it.id}
+              type="button"
+              onClick={() => { onChange({ id: it.id, name: it.name }); setSearch(''); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200"
+            >
+              {it.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatDisplay(val: unknown): string {
   if (val == null) return '—';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
   if (Array.isArray(val)) return val.join(', ') || '—';
+  if (typeof val === 'object' && 'name' in (val as Record<string, unknown>) && 'id' in (val as Record<string, unknown>)) {
+    return (val as { name: string }).name;
+  }
   if (typeof val === 'object' && 'value' in (val as Record<string, unknown>)) {
     const v = val as { value: number; unit: string };
     return `${v.value} ${v.unit}`;

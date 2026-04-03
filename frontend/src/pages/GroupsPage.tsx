@@ -100,31 +100,42 @@ export default function GroupsPage() {
             <Link
               key={group.id}
               to={`/groups/${group.id}`}
-              className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 p-5 hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-sm transition-all group"
+              className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-sm transition-all group overflow-hidden"
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="font-semibold text-stone-800 dark:text-stone-100 group-hover:text-stone-900 dark:group-hover:text-white">{group.name}</h2>
-                  {group.description && (
-                    <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">{group.description}</p>
-                  )}
+              {group.thumbnail && (
+                <div className="h-32 bg-stone-100 dark:bg-stone-800">
+                  <img
+                    src={api.groups.thumbnailUrl(group.id)}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 </div>
-                <button
-                  onClick={e => {
-                    e.preventDefault();
-                    handleDelete(group.id);
-                  }}
-                  className="text-stone-300 dark:text-stone-600 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100"
-                  title="Delete"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
-                </button>
-              </div>
-              <div className="flex gap-4 mt-4 text-xs text-stone-400 dark:text-stone-500">
-                <span>{group.schema_count} schema{group.schema_count !== 1 ? 's' : ''}</span>
-                <span>{group.item_count} item{group.item_count !== 1 ? 's' : ''}</span>
+              )}
+              <div className="p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="font-semibold text-stone-800 dark:text-stone-100 group-hover:text-stone-900 dark:group-hover:text-white">{group.name}</h2>
+                    {group.description && (
+                      <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">{group.description}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={e => {
+                      e.preventDefault();
+                      handleDelete(group.id);
+                    }}
+                    className="text-stone-300 dark:text-stone-600 hover:text-red-400 transition-colors p-1 opacity-0 group-hover:opacity-100"
+                    title="Delete"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="flex gap-4 mt-4 text-xs text-stone-400 dark:text-stone-500">
+                  <span>{group.schema_count} schema{group.schema_count !== 1 ? 's' : ''}</span>
+                  <span>{group.item_count} item{group.item_count !== 1 ? 's' : ''}</span>
+                </div>
               </div>
             </Link>
           ))}

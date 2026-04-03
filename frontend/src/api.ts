@@ -25,6 +25,19 @@ export const api = {
     update: (id: number, data: { name?: string; description?: string }) =>
       request<Group>(`/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: number) => request<void>(`/groups/${id}`, { method: 'DELETE' }),
+    uploadThumbnail: async (id: number, file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE}/groups/${id}/thumbnail`, {
+        method: 'POST',
+        body: form,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      return res.json() as Promise<Group>;
+    },
+    deleteThumbnail: (id: number) =>
+      request<void>(`/groups/${id}/thumbnail`, { method: 'DELETE' }),
+    thumbnailUrl: (id: number) => `${BASE}/groups/${id}/thumbnail`,
   },
 
   schemas: {

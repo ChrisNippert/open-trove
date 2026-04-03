@@ -1,13 +1,22 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+from pathlib import Path
+from io import BytesIO
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from PIL import Image as PILImage
 
 from ..database import get_db
 from ..models import Group, ItemSchema, Item
 from ..schemas import GroupCreate, GroupUpdate, GroupOut
+from ..config import IMAGES_DIR, THUMBNAIL_SIZE
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
+
+ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
 @router.get("", response_model=list[GroupOut])
@@ -33,6 +42,7 @@ async def list_groups(db: AsyncSession = Depends(get_db)):
             id=group.id,
             name=group.name,
             description=group.description or "",
+            thumbnail=group.thumbnail,
             created_at=group.created_at,
             updated_at=group.updated_at,
             schema_count=schema_count,
@@ -49,6 +59,7 @@ async def create_group(body: GroupCreate, db: AsyncSession = Depends(get_db)):
     await db.refresh(group)
     return GroupOut(
         id=group.id, name=group.name, description=group.description or "",
+        thumbnail=group.thumbnail,
         created_at=group.created_at, updated_at=group.updated_at,
     )
 
@@ -66,6 +77,7 @@ async def get_group(group_id: int, db: AsyncSession = Depends(get_db)):
     )).scalar() or 0
     return GroupOut(
         id=group.id, name=group.name, description=group.description or "",
+        thumbnail=group.thumbnail,
         created_at=group.created_at, updated_at=group.updated_at,
         schema_count=schema_count, item_count=item_count,
     )
@@ -84,6 +96,7 @@ async def update_group(group_id: int, body: GroupUpdate, db: AsyncSession = Depe
     await db.refresh(group)
     return GroupOut(
         id=group.id, name=group.name, description=group.description or "",
+        thumbnail=group.thumbnail,
         created_at=group.created_at, updated_at=group.updated_at,
     )
 
@@ -93,5 +106,77 @@ async def delete_group(group_id: int, db: AsyncSession = Depends(get_db)):
     group = await db.get(Group, group_id)
     if not group:
         raise HTTPException(404, "Group not found")
+    # Clean up thumbnail file
+    if group.thumbnail:
+        thumb_path = IMAGES_DIR / group.thumbnail
+        if thumb_path.exists():
+            thumb_path.unlink(missing_ok=True)
     await db.delete(group)
     await db.commit()
+
+
+@router.post("/{group_id}/thumbnail", response_model=GroupOut)
+async def upload_group_thumbnail(
+    group_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    group = await db.get(Group, group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+
+    if file.content_type not in ALLOWED_MIME:
+        raise HTTPException(400, f"File type not allowed. Allowed: {', '.join(ALLOWED_MIME)}")
+
+    content = await file.read()
+
+    # Delete old thumbnail if it exists
+    if group.thumbnail:
+        old_path = IMAGES_DIR / group.thumbnail
+        if old_path.exists():
+            old_path.unlink(missing_ok=True)
+
+    # Create thumbnail-sized image
+    try:
+        with PILImage.open(BytesIO(content)) as img:
+            img.thumbnail(THUMBNAIL_SIZE, PILImage.Resampling.LANCZOS)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            filename = f"group_{uuid.uuid4().hex}_thumb.jpg"
+            thumb_path = IMAGES_DIR / filename
+            img.save(thumb_path, "JPEG", quality=85)
+    except Exception:
+        raise HTTPException(400, "Could not process image")
+
+    group.thumbnail = filename
+    await db.commit()
+    await db.refresh(group)
+    return GroupOut(
+        id=group.id, name=group.name, description=group.description or "",
+        thumbnail=group.thumbnail,
+        created_at=group.created_at, updated_at=group.updated_at,
+    )
+
+
+@router.delete("/{group_id}/thumbnail", status_code=204)
+async def delete_group_thumbnail(group_id: int, db: AsyncSession = Depends(get_db)):
+    group = await db.get(Group, group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+    if group.thumbnail:
+        thumb_path = IMAGES_DIR / group.thumbnail
+        if thumb_path.exists():
+            thumb_path.unlink(missing_ok=True)
+        group.thumbnail = None
+        await db.commit()
+
+
+@router.get("/{group_id}/thumbnail")
+async def get_group_thumbnail(group_id: int, db: AsyncSession = Depends(get_db)):
+    group = await db.get(Group, group_id)
+    if not group or not group.thumbnail:
+        raise HTTPException(404, "No thumbnail")
+    thumb_path = IMAGES_DIR / group.thumbnail
+    if not thumb_path.exists():
+        raise HTTPException(404, "Thumbnail file missing")
+    return FileResponse(thumb_path, media_type="image/jpeg")

@@ -2,6 +2,7 @@ export interface Group {
   id: number;
   name: string;
   description: string;
+  thumbnail: string | null;
   created_at: string;
   updated_at: string;
   schema_count: number;
@@ -19,6 +20,8 @@ export interface FieldDef {
   formula?: string;
   result_type?: string;
   unit_from?: string;
+  link_group_id?: number;
+  link_schema_id?: number;
 }
 
 export interface SchemaSections {
