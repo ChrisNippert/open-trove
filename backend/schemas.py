@@ -72,6 +72,7 @@ class ImageOut(BaseModel):
 
 class ItemOut(BaseModel):
     id: int
+    uuid: str
     group_id: int
     schema_id: int
     name: str

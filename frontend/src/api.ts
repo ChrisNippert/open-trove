@@ -115,8 +115,12 @@ export const api = {
     return request<Item[]>(`/search?${params}`);
   },
 
-  facets: (groupId: number) =>
-    request<{ facets: Record<string, { type: string; field: string; options?: { value: string; count: number }[]; min?: number | null; max?: number | null; unit?: string; true_count?: number; false_count?: number }>; tags: { tag: string; count: number }[] }>(`/search/facets?group_id=${groupId}`),
+  facets: (groupId: number, filters?: string, tag?: string) => {
+    const params = new URLSearchParams({ group_id: String(groupId) });
+    if (filters) params.set('filters', filters);
+    if (tag) params.set('tag', tag);
+    return request<{ facets: Record<string, { type: string; field: string; options?: { value: string; count: number }[]; min?: number | null; max?: number | null; unit?: string; true_count?: number; false_count?: number }>; tags: { tag: string; count: number }[] }>(`/search/facets?${params}`);
+  },
 
   views: {
     list: (groupId: number) => request<DirectoryView[]>(`/groups/${groupId}/views`),

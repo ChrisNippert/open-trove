@@ -1,4 +1,5 @@
 import json
+import uuid as uuid_module
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
@@ -43,6 +44,7 @@ class Item(Base):
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid_module.uuid4()))
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
     schema_id = Column(Integer, ForeignKey("item_schemas.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False, default="")

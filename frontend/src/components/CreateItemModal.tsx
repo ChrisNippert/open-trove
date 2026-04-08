@@ -37,6 +37,27 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
   const schema = schemas.find(s => s.id === schemaId);
   const sections = schema?.definition?.sections || {};
 
+  function buildDefaults(s: ItemSchema | undefined): Record<string, unknown> {
+    const defaults: Record<string, unknown> = {};
+    if (!s?.definition?.sections) return defaults;
+    for (const fields of Object.values(s.definition.sections)) {
+      for (const [fieldName, fieldDef] of Object.entries(fields)) {
+        const fd = fieldDef as FieldDef;
+        if (fd.type === 'boolean') defaults[fieldName] = false;
+        // Initialize multi-value fields as empty arrays
+        if ((fd.max_count === 0 || (fd.max_count != null && fd.max_count > 1))
+            && !['multiselect', 'boolean', 'textarea', 'computed', 'image'].includes(fd.type)) {
+          defaults[fieldName] = [];
+        }
+      }
+    }
+    return defaults;
+  }
+
+  useEffect(() => {
+    setFormData(buildDefaults(schema));
+  }, [schemaId]);
+
   function setField(name: string, value: unknown) {
     setFormData(prev => ({ ...prev, [name]: value }));
   }
@@ -131,8 +152,8 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
   }));
 
   return (
-    <div className="fixed inset-0 bg-black/30 dark:bg-black/50 z-50 flex items-start justify-center pt-16 px-4 overflow-y-auto">
-      <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 w-full max-w-2xl shadow-xl mb-16">
+    <div className="fixed inset-0 bg-black/30 dark:bg-black/50 z-50 flex items-start justify-center pt-16 px-4 overflow-y-auto animate-fade-in">
+      <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 w-full max-w-2xl shadow-xl mb-16 animate-scale-in">
         <div className="flex items-center justify-between p-5 border-b border-stone-100 dark:border-stone-800">
           <h2 className="text-lg font-semibold text-stone-800 dark:text-stone-100">Add Item</h2>
           <button onClick={onClose} className="text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300">&times;</button>
@@ -159,8 +180,8 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
               <select
                 value={schemaId}
                 onChange={e => {
-                  setSchemaId(Number(e.target.value));
-                  setFormData({});
+                  const newSid = Number(e.target.value);
+                  setSchemaId(newSid);
                 }}
                 className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
               >
@@ -184,18 +205,64 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
               </button>
               {!collapsedSections[sectionName] && (
                 <div className="grid gap-3 sm:grid-cols-2">
-                {Object.entries(fields).map(([fieldName, fieldDef]) => (
-                  <FieldInput
-                    key={fieldName}
-                    name={fieldName}
-                    def={fieldDef as FieldDef}
-                    value={formData[fieldName]}
-                    onChange={val => setField(fieldName, val)}
-                    namedImageSelection={namedImageSelections[fieldName] || null}
-                    availableImageOptions={queuedImageOptions}
-                    onImageSelection={selection => setNamedImageSelection(fieldName, selection)}
-                  />
-                ))}
+                {Object.entries(fields).map(([fieldName, fieldDef]) => {
+                  const fd = fieldDef as FieldDef;
+                  const isMulti = (fd.max_count === 0 || (fd.max_count != null && fd.max_count > 1))
+                    && !['multiselect', 'boolean', 'textarea', 'computed', 'image'].includes(fd.type);
+
+                  if (isMulti) {
+                    const values = Array.isArray(formData[fieldName]) ? formData[fieldName] as unknown[] : [];
+                    const atMax = fd.max_count! > 0 && values.length >= fd.max_count!;
+                    const label = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+                    return (
+                      <div key={fieldName} className="sm:col-span-2">
+                        <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+                        <div className="space-y-2">
+                          {values.map((v, i) => (
+                            <div key={i} className="flex gap-2 items-start">
+                              <div className="flex-1">
+                                <FieldInput
+                                  name=""
+                                  def={{...fd, max_count: undefined}}
+                                  value={v}
+                                  onChange={newV => {
+                                    const updated = [...values];
+                                    updated[i] = newV;
+                                    setField(fieldName, updated);
+                                  }}
+                                  namedImageSelection={null}
+                                  availableImageOptions={queuedImageOptions}
+                                  onImageSelection={() => {}}
+                                />
+                              </div>
+                              <button type="button" onClick={() => setField(fieldName, values.filter((_, j) => j !== i))}
+                                className="text-stone-400 hover:text-red-400 text-sm px-1 mt-2">&times;</button>
+                            </div>
+                          ))}
+                          {!atMax && (
+                            <button type="button" onClick={() => setField(fieldName, [...values, getDefaultForType(fd)])}
+                              className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300">
+                              + Add entry
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <FieldInput
+                      key={fieldName}
+                      name={fieldName}
+                      def={fd}
+                      value={formData[fieldName]}
+                      onChange={val => setField(fieldName, val)}
+                      namedImageSelection={namedImageSelections[fieldName] || null}
+                      availableImageOptions={queuedImageOptions}
+                      onImageSelection={selection => setNamedImageSelection(fieldName, selection)}
+                    />
+                  );
+                })}
               </div>
               )}
             </div>
@@ -351,6 +418,34 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
 
   if (def.type === 'link') {
     return <LinkFieldInput name={name} def={def} value={value} onChange={onChange} />;
+  }
+
+  if (def.type === 'hierarchy') {
+    const hierarchy = def.hierarchy_options || {};
+    const parents = Object.keys(hierarchy);
+    const strVal = typeof value === 'string' ? value : '';
+    const parts = strVal.split(' > ');
+    const selectedParent = parts[0] || '';
+    const selectedChild = parts.length > 1 ? parts.slice(1).join(' > ') : '';
+    const children = selectedParent && hierarchy[selectedParent] ? hierarchy[selectedParent] : [];
+
+    return (
+      <div className="sm:col-span-2">
+        {label && <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>}
+        <div className="flex gap-2">
+          <select value={selectedParent} onChange={e => onChange(e.target.value || '')} className="flex-1 px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200">
+            <option value="">Select category...</option>
+            {parents.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          {children.length > 0 && (
+            <select value={selectedChild} onChange={e => onChange(e.target.value ? `${selectedParent} > ${e.target.value}` : selectedParent)} className="flex-1 px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200">
+              <option value="">Any...</option>
+              {children.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+        </div>
+      </div>
+    );
   }
 
   if (def.type === 'dropdown') {
@@ -570,4 +665,13 @@ function LinkFieldInput({ name, def, value, onChange }: {
       )}
     </div>
   );
+}
+
+function getDefaultForType(fd: FieldDef): unknown {
+  switch (fd.type) {
+    case 'int': case 'float': return null;
+    case 'unit': return { value: 0, unit: fd.default_unit || '' };
+    case 'link': return null;
+    default: return '';
+  }
 }

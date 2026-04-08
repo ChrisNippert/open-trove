@@ -1,31 +1,20 @@
+PLEASE ANSWER QUESTIONS WITHIN THIS BLOCK
 # Questions that you should answer
 Q: When changing schema, are we calling an update to make sure everything has the new fields or just assuming empty for them?
-A: 
+A: Just assuming empty. The schema update only saves the new definition — existing items are not modified. The frontend gracefully handles missing fields by displaying them as empty/blank. This is intentional to avoid expensive migrations on every schema edit.
 
-DON'T EDIT ANYTHING BELOW IN THIS FILE! IT IS ONLY TO BE EDITED MANUALLY!
+DON'T EDIT ANYTHING BELOW THIS LINE IN THIS FILE! BELOW IS ONLY TO BE EDITED MANUALLY!
 
 
 # Bugs
 <!-- * Setup instructions:  used ./.venv/Script/Activate.ps1 for Windows, no .venv/bin folder -->
-* When refresh, it flashes light theme and then goes to dark if i have selected dark. Can we make it so it doesn't flashbang
-* When booleans are in the schema, default to false instead of nothing
 
 # QoL
-* For every datatype, allow a schema defined value associated with how many there are
-    * 0 would be any amount, say for a list of links for some field
-    * \>0 would just limit to that amount.
-* Add a back button that feels intuitive to he top left
-    * Please move the back button next to the item name
-
-* In the heirarchy field, instead of just saying Collections/Groups/<Itemname>, instead replace collections and groups with the actual collection and group selected.
-    * This should also effect when in schema edit mode
 
 ## Images
 
 
 ## Linked Data:
-* Add thumbnail image for a linked item next to the link when applicable
-    * Make it a bit larger please
 * When an item is deleted, it's ID spot presumably can be taken, since there was an item that was deleted, and a new item took it's place, and now the links point to the wrong item since the ID is the same.
     * Fixed by giving each item a unique uuid
     * Depending on the sql database schema, this might require a change from some int to a string since items will have alphanumeric codes
@@ -33,26 +22,12 @@ DON'T EDIT ANYTHING BELOW IN THIS FILE! IT IS ONLY TO BE EDITED MANUALLY!
 ## Export/Import:
 
 ## Search:
-* might be a pain in the ass, but it would be nice for search filters to be parsed from the url, so going back a page after viewing an item from the search page preserved the search results
-    * It's in the URL, but when going to the url it is not read from, instead just getting rid of the filters in the URL. It does read group id and schema ID from the Url though?
-    * Boolean does not successfully work in the filters in the search
 * new color field type that could use a color picker as input, and then display close-ish colors on search?
     * Would require color classification on the images or edge detection to get the subject, average the color pixels, and then get nearest color
 
-* When changing filters, the search button flashes
-    * Instead of changing search to "...", change to loading svg icon somewhere
-    * Put the loading svg in the area where the items should be instead. Leave the search button text static
 
-* Improve text search as "Japa" doesn't pop up "Japanese"
 
 ## collection view:
-* multiselect for delete would be a nice to have, but still prompt the user for confirmation before actually removing (would be good for cleanig up import mistakes lol)
-    * Maybe for items have a checkbox in the table view to the left and can do things like delete or mass edit
-* would be cool to have a multi-level dropdown of options so that we can define heirarchical droptdown esque structures. Say that we have "Letters", and "a" is a child of that. We also have "Integers" of which "1" and "2" are children. this should be configurable to any heirarchical level the user needs. When selecting something like "2", it should automatically set the outer dropdown to "Integers"
-    * double wide, like how textarea spans both columns when displayed to the user
-    <!-- * Could take in a string of json as the schema config for the options -->
-    <!-- * The first dropdown configures the second dropdown's options -->
-    * ie: categorizing "tops" could have blouses, tank tops, sweaters etc, while "bottoms" have pants, skirts, etc.
 
 
 
@@ -101,3 +76,36 @@ DON'T EDIT ANYTHING BELOW IN THIS FILE! IT IS ONLY TO BE EDITED MANUALLY!
 * Make key bind ctrl+s save when in edit mode
 * Add images to the items in a table view in collection
 * For linked items that don't exist, make the linked text red
+
+* Add a back button that feels intuitive to he top left
+* Add thumbnail image for a linked item next to the link when applicable
+* might be a pain in the ass, but it would be nice for search filters to be parsed from the url, so going back a page after viewing an item from the search page preserved the search results
+* Improve text search as "Japa" doesn't pop up "Japanese"
+
+* In the heirarchy field, instead of just saying Collections/Groups/<Itemname>, instead replace collections and groups with the actual collection and group selected.
+* When changing filters, little loading icon
+* multiselect for delete would be a nice to have, but still prompt the user for confirmation before actually removing (would be good for cleanig up import mistakes lol)
+
+* For every datatype, allow a schema defined value associated with how many there are
+    * 0 would be any amount, say for a list of links for some field
+    * \>0 would just limit to that amount.
+* would be cool to have a multi-level dropdown of options so that we can define heirarchical droptdown esque structures. Say that we have "Letters", and "a" is a child of that. We also have "Integers" of which "1" and "2" are children. this should be configurable to any heirarchical level the user needs. When selecting something like "2", it should automatically set the outer dropdown to "Integers"
+    * double wide, like how textarea spans both columns when displayed to the user
+    <!-- * Could take in a string of json as the schema config for the options -->
+    <!-- * The first dropdown configures the second dropdown's options -->
+    * ie: categorizing "tops" could have blouses, tank tops, sweaters etc, while "bottoms" have pants, skirts, etc.
+    * This is done however works a little differently than expected
+* When filtering, can you modify all the counts within the filter parameters? Such as if I select Ram=8, all the options with ram=8 are the only ones that make up the numbers for the other filter counts.
+
+* When refresh, it flashes light theme and then goes to dark if i have selected dark. Can we make it so it doesn't flashbang
+
+* Tags that are too long have a non-fitting background if the column is too small. maybe just make it a square with rounded corners instead of  rounded sides.
+* Add Group Edit if all the items selected are the same type. if not, grey it out. This should bring up one of the items and then any change made in that item propogates to all the selected items when in group edit mode.
+
+* Make Edit button for schemas more intuitive or easier to click.
+
+* Can you make the max count be a bit more intuitive?
+* Add skeletons to make the UI feel smoother
+* Add some UI animation fluff that is lightweight but makes the UX feel nice
+
+* for count, the plus and minus should be more clickable, and the number maybe typeable? Also if no other config options, please remove the config dropdown as it shows nothing

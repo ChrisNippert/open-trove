@@ -74,7 +74,7 @@ export default function ImageSourceModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 animate-fade-in" onClick={onClose}>
       <div
         className="w-full max-w-lg rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-700 dark:bg-stone-900"
         onClick={event => event.stopPropagation()}

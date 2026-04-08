@@ -25,6 +25,7 @@ def _normalize_filter_value(value):
 def _item_to_out(item: Item) -> ItemOut:
     return ItemOut(
         id=item.id,
+        uuid=item.uuid or "",
         group_id=item.group_id,
         schema_id=item.schema_id,
         name=item.name or "",
@@ -168,15 +169,76 @@ async def search(
     return [_item_to_out(item) for item in items]
 
 
-FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit"}
+FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit", "hierarchy"}
 
 
 @router.get("/facets")
 async def get_facets(
     group_id: int,
+    filters: str | None = None,
+    tag: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Return filterable facets with counts and ranges for a group."""
+    # Compute base item IDs from active filters for dynamic counts
+    base_ids: set[int] | None = None
+
+    if tag and tag.strip():
+        tag_values = [t.strip() for t in tag.split(',') if t.strip()]
+        tag_result_f = await db.execute(
+            select(ItemTag.item_id).where(ItemTag.tag.in_(tag_values))
+        )
+        tag_ids = set(row[0] for row in tag_result_f.fetchall())
+        group_items = await db.execute(select(Item.id).where(Item.group_id == group_id))
+        group_item_ids = set(row[0] for row in group_items.fetchall())
+        base_ids = tag_ids & group_item_ids
+
+    if filters:
+        try:
+            filter_list = json.loads(filters)
+        except (json.JSONDecodeError, TypeError):
+            filter_list = []
+        for f in filter_list:
+            f_field = f.get("field")
+            f_op = f.get("op", "=")
+            f_value = f.get("value")
+            if not f_field or f_value is None:
+                continue
+            if f_op.lower() == "in" and isinstance(f_value, list):
+                combined: set[int] = set()
+                for val in f_value:
+                    normalized = _normalize_filter_value(val)
+                    ids = set(await filter_items_by_field(
+                        db, group_id, f_field, "=", normalized, limit=500
+                    ))
+                    combined.update(ids)
+                if base_ids is not None:
+                    base_ids = base_ids & combined
+                else:
+                    base_ids = combined
+                continue
+            try:
+                parsed_val = float(f_value) if isinstance(f_value, str) else f_value
+            except (ValueError, TypeError):
+                parsed_val = f_value
+            parsed_val = _normalize_filter_value(parsed_val)
+            f_ids = set(await filter_items_by_field(
+                db, group_id, f_field, f_op, parsed_val, limit=500
+            ))
+            if base_ids is not None:
+                base_ids = base_ids & f_ids
+            else:
+                base_ids = f_ids
+
+    # Build base filter clause for SQL queries
+    if base_ids is not None:
+        if not base_ids:
+            return {"facets": {}, "tags": []}
+        id_list = ",".join(str(int(i)) for i in base_ids)
+        base_clause = f"AND items.id IN ({id_list}) "
+    else:
+        base_clause = ""
+
     schemas_result = await db.execute(
         select(ItemSchema).where(ItemSchema.group_id == group_id)
     )
@@ -192,19 +254,28 @@ async def get_facets(
                 if ftype not in FACET_TYPES:
                     continue
 
-                if ftype in ("dropdown", "multiselect"):
-                    schema_options = (
-                        field_def.get("options")
-                        or field_def.get("dropdown-items")
-                        or field_def.get("multiselect-items")
-                        or []
-                    )
+                if ftype in ("dropdown", "multiselect", "hierarchy"):
+                    if ftype == "hierarchy":
+                        hierarchy = field_def.get("hierarchy_options", {})
+                        schema_options = []
+                        for parent, children in hierarchy.items():
+                            schema_options.append(parent)
+                            for child in children:
+                                schema_options.append(f"{parent} > {child}")
+                    else:
+                        schema_options = (
+                            field_def.get("options")
+                            or field_def.get("dropdown-items")
+                            or field_def.get("multiselect-items")
+                            or []
+                        )
                     if ftype == "multiselect":
                         # For multiselect, values are JSON arrays — expand them via json_each
                         count_result = await db.execute(text(
                             "SELECT j.value as val, COUNT(DISTINCT items.id) as cnt "
                             "FROM items, json_each(json_extract(items.data, :path)) j "
                             "WHERE items.group_id = :gid "
+                            f"{base_clause}"
                             "AND json_type(items.data, :path) = 'array' "
                             "GROUP BY j.value"
                         ), {"path": f"$.{field_name}", "gid": group_id})
@@ -212,7 +283,7 @@ async def get_facets(
                         # Count items per option value
                         count_result = await db.execute(text(
                             "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
-                            "FROM items WHERE group_id = :gid "
+                            f"FROM items WHERE group_id = :gid {base_clause}"
                             "AND json_extract(data, :path) IS NOT NULL "
                             "GROUP BY val"
                         ), {"path": f"$.{field_name}", "gid": group_id})
@@ -228,7 +299,7 @@ async def get_facets(
                 elif ftype == "boolean":
                     count_result = await db.execute(text(
                         "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
-                        "FROM items WHERE group_id = :gid "
+                        f"FROM items WHERE group_id = :gid {base_clause}"
                         "AND json_extract(data, :path) IS NOT NULL "
                         "GROUP BY val"
                     ), {"path": f"$.{field_name}", "gid": group_id})
@@ -244,7 +315,7 @@ async def get_facets(
                     mm = await db.execute(text(
                         "SELECT MIN(CAST(json_extract(data, :path) AS REAL)), "
                         "MAX(CAST(json_extract(data, :path) AS REAL)) "
-                        "FROM items WHERE group_id = :gid "
+                        f"FROM items WHERE group_id = :gid {base_clause}"
                         "AND json_extract(data, :path) IS NOT NULL"
                     ), {"path": f"$.{field_name}", "gid": group_id})
                     row = mm.fetchone()
@@ -258,7 +329,7 @@ async def get_facets(
                     mm = await db.execute(text(
                         "SELECT MIN(CAST(json_extract(data, :path) AS REAL)), "
                         "MAX(CAST(json_extract(data, :path) AS REAL)) "
-                        "FROM items WHERE group_id = :gid "
+                        f"FROM items WHERE group_id = :gid {base_clause}"
                         "AND json_extract(data, :path) IS NOT NULL"
                     ), {"path": f"$.{field_name}.value", "gid": group_id})
                     row = mm.fetchone()
@@ -270,13 +341,15 @@ async def get_facets(
                     }
 
     # Collect tags with counts
-    tag_result = await db.execute(
+    tag_q = (
         select(ItemTag.tag, func.count(ItemTag.tag).label("cnt"))
         .join(Item, Item.id == ItemTag.item_id)
         .where(Item.group_id == group_id)
-        .group_by(ItemTag.tag)
-        .order_by(func.count(ItemTag.tag).desc())
     )
+    if base_ids is not None:
+        tag_q = tag_q.where(Item.id.in_(base_ids))
+    tag_q = tag_q.group_by(ItemTag.tag).order_by(func.count(ItemTag.tag).desc())
+    tag_result = await db.execute(tag_q)
     tags = [{"tag": row[0], "count": row[1]} for row in tag_result.fetchall()]
 
     return {"facets": facets, "tags": tags}

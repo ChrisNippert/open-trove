@@ -18,7 +18,7 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
     : null;
 
   return (
-    <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-sm transition-all group">
+    <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group">
       <Link to={`/groups/${groupId}/items/${item.id}`}>
         {/* Image area */}
         <div className="aspect-square bg-stone-100 dark:bg-stone-800 relative overflow-hidden">
@@ -42,7 +42,7 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
           {item.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">
               {item.tags.slice(0, 3).map(t => (
-                <span key={t} className="bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 text-[10px] px-1.5 py-0.5 rounded-full">
+                <span key={t} className="bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 text-[10px] px-1.5 py-0.5 rounded max-w-[100px] truncate inline-block" title={t}>
                   {t}
                 </span>
               ))}

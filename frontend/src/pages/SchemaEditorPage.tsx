@@ -5,7 +5,7 @@ import type { ItemSchema, SchemaDefinition, FieldDef, Group } from '../types';
 
 const FIELD_TYPES = [
   'string', 'textarea', 'int', 'float', 'boolean', 'date', 'datetime',
-  'dropdown', 'multiselect', 'unit', 'computed', 'image', 'link', 'url',
+  'dropdown', 'multiselect', 'hierarchy', 'unit', 'computed', 'image', 'link', 'url',
 ];
 
 const UNIT_CATEGORIES = ['mass', 'volume', 'length', 'currency', 'count'];
@@ -30,6 +30,7 @@ export default function SchemaEditorPage() {
   const [schema, setSchema] = useState<ItemSchema | null>(null);
   const [definition, setDefinition] = useState<SchemaDefinition>({ sections: {} });
   const [name, setName] = useState('');
+  const [groupName, setGroupName] = useState('Group');
   const [saving, setSaving] = useState(false);
   const [newSection, setNewSection] = useState('');
   const [newFieldSection, setNewFieldSection] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export default function SchemaEditorPage() {
   useEffect(() => {
     loadSchema();
     api.groups.list().then(setAllGroups);
+    api.groups.get(gid).then(g => setGroupName(g.name)).catch(() => undefined);
   }, [gid, sid]);
 
   async function loadSchema() {
@@ -138,6 +140,7 @@ export default function SchemaEditorPage() {
     if (newFieldType === 'dropdown') fieldDef.options = [];
     if (newFieldType === 'multiselect') fieldDef['multiselect-items'] = [];
     if (newFieldType === 'unit') { fieldDef.unit_category = 'mass'; fieldDef.default_unit = 'g'; }
+    if (newFieldType === 'hierarchy') fieldDef.hierarchy_options = {};
 
     setDefinition(prev => ({
       ...prev,
@@ -217,6 +220,9 @@ export default function SchemaEditorPage() {
         newDef.formula = oldDef.formula || '';
         newDef.result_type = oldDef.result_type || 'float';
       }
+      if (newType === 'hierarchy') {
+        newDef.hierarchy_options = oldDef.hierarchy_options || {};
+      }
       return {
         ...prev,
         sections: {
@@ -231,15 +237,17 @@ export default function SchemaEditorPage() {
   }
 
   if (!schema) {
-    return <div className="text-stone-400 dark:text-stone-500 text-center py-12">Loading...</div>;
+    return (
+      <div />
+    );
   }
 
   return (
-    <div>
+    <div className="animate-content-in">
       <div className="flex items-center gap-2 text-sm text-stone-400 dark:text-stone-500 mb-4">
         <Link to="/groups" className="hover:text-stone-600 dark:hover:text-stone-300">Collections</Link>
         <span>/</span>
-        <Link to={`/groups/${gid}`} className="hover:text-stone-600 dark:hover:text-stone-300">Group</Link>
+        <Link to={`/groups/${gid}`} className="hover:text-stone-600 dark:hover:text-stone-300">{groupName}</Link>
         <span>/</span>
         <span className="text-stone-600 dark:text-stone-300">Schema: {schema.name}</span>
       </div>
@@ -502,7 +510,8 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
   const [expanded, setExpanded] = useState(false);
 
   // Does this type have configurable options?
-  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link'].includes(def.type);
+  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link', 'hierarchy'].includes(def.type);
+  const supportsCardinality = !['computed'].includes(def.type);
 
   // Auto-expand options panel when switching to a configurable type
   useEffect(() => {
@@ -557,6 +566,48 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
           {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         {def.required && <span className="text-xs text-amber-500">*</span>}
+
+        {supportsCardinality && (
+          <div className="flex items-center gap-0.5 ml-1">
+            <button
+              onClick={() => {
+                const cur = def.max_count;
+                const next = cur != null && cur > 1 ? cur - 1 : cur === 0 ? undefined : undefined;
+                onUpdate('max_count', next);
+              }}
+              className="w-5 h-5 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-600 dark:hover:text-stone-300 text-sm"
+              title="Decrease max count"
+            >
+              −
+            </button>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={def.max_count == null ? '1' : def.max_count === 0 ? '∞' : String(def.max_count)}
+              onChange={e => {
+                const raw = e.target.value.trim();
+                if (raw === '' || raw === '1') onUpdate('max_count', undefined);
+                else if (raw === '∞' || raw === '0' || raw.toLowerCase() === 'inf') onUpdate('max_count', 0);
+                else { const n = parseInt(raw, 10); if (!isNaN(n) && n >= 0) onUpdate('max_count', n === 1 ? undefined : n === 0 ? 0 : n); }
+              }}
+              onFocus={e => e.target.select()}
+              className="w-7 text-center text-xs text-stone-500 dark:text-stone-400 bg-transparent border-b border-stone-300 dark:border-stone-600 focus:border-stone-500 dark:focus:border-stone-400 focus:outline-none py-0"
+              title={def.max_count === 0 ? 'Unlimited list' : def.max_count != null ? `Max ${def.max_count}` : 'Single value'}
+            />
+            <button
+              onClick={() => {
+                const cur = def.max_count;
+                if (cur == null) onUpdate('max_count', 2);
+                else if (cur === 0) {} // already unlimited
+                else onUpdate('max_count', cur + 1);
+              }}
+              className="w-5 h-5 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-600 dark:hover:text-stone-300 text-sm"
+              title="Increase max count"
+            >
+              +
+            </button>
+          </div>
+        )}
 
         <div className="ml-auto flex items-center gap-1">
           {hasConfig && (
@@ -638,6 +689,13 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
 
           {def.type === 'link' && (
             <LinkFieldConfig def={def} allGroups={allGroups} onUpdate={onUpdate} />
+          )}
+
+          {def.type === 'hierarchy' && (
+            <HierarchyConfig
+              value={def.hierarchy_options || {}}
+              onChange={v => onUpdate('hierarchy_options', v)}
+            />
           )}
         </div>
       )}
@@ -723,6 +781,95 @@ function OptionsInput({ value, onChange }: { value: string[]; onChange: (v: stri
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
         className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
       />
+    </div>
+  );
+}
+
+/* ---- Hierarchy Config ---- */
+
+function HierarchyConfig({ value, onChange }: { value: Record<string, string[]>; onChange: (v: Record<string, string[]>) => void }) {
+  const [newParent, setNewParent] = useState('');
+  const [newChildren, setNewChildren] = useState<Record<string, string>>({});
+
+  function addParent() {
+    const name = newParent.trim();
+    if (!name || name in value) return;
+    onChange({ ...value, [name]: [] });
+    setNewParent('');
+  }
+
+  function removeParent(parent: string) {
+    const { [parent]: _, ...rest } = value;
+    onChange(rest);
+  }
+
+  function renameParent(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || trimmed in value) return;
+    const entries = Object.entries(value);
+    const result: Record<string, string[]> = {};
+    for (const [k, v] of entries) {
+      result[k === oldName ? trimmed : k] = v;
+    }
+    onChange(result);
+  }
+
+  function addChild(parent: string) {
+    const name = (newChildren[parent] || '').trim();
+    if (!name || value[parent].includes(name)) return;
+    onChange({ ...value, [parent]: [...value[parent], name] });
+    setNewChildren(prev => ({ ...prev, [parent]: '' }));
+  }
+
+  function removeChild(parent: string, child: string) {
+    onChange({ ...value, [parent]: value[parent].filter(c => c !== child) });
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="text-stone-500 dark:text-stone-400">Hierarchy options</label>
+      {Object.entries(value).map(([parent, children]) => (
+        <div key={parent} className="border border-stone-200 dark:border-stone-700 rounded p-2 space-y-1">
+          <div className="flex items-center gap-1">
+            <input
+              defaultValue={parent}
+              onBlur={e => renameParent(parent, e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              className="flex-1 px-1.5 py-0.5 text-sm font-medium bg-transparent border-b border-transparent hover:border-stone-300 dark:hover:border-stone-600 focus:border-stone-400 dark:focus:border-stone-500 focus:outline-none text-stone-700 dark:text-stone-200"
+            />
+            <button type="button" onClick={() => removeParent(parent)} className="text-stone-300 dark:text-stone-600 hover:text-red-400 text-xs">&times;</button>
+          </div>
+          <div className="ml-3 space-y-0.5">
+            {children.map(child => (
+              <div key={child} className="flex items-center gap-1">
+                <span className="text-xs text-stone-500 dark:text-stone-400">└</span>
+                <span className="text-xs text-stone-600 dark:text-stone-300 flex-1">{child}</span>
+                <button type="button" onClick={() => removeChild(parent, child)} className="text-stone-300 dark:text-stone-600 hover:text-red-400 text-[10px]">&times;</button>
+              </div>
+            ))}
+            <div className="flex items-center gap-1 mt-1">
+              <input
+                value={newChildren[parent] || ''}
+                onChange={e => setNewChildren(prev => ({ ...prev, [parent]: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addChild(parent); } }}
+                placeholder="Add child..."
+                className="flex-1 px-1.5 py-0.5 text-xs border border-stone-200 dark:border-stone-700 rounded bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200"
+              />
+              <button type="button" onClick={() => addChild(parent)} className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300">+</button>
+            </div>
+          </div>
+        </div>
+      ))}
+      <div className="flex gap-1">
+        <input
+          value={newParent}
+          onChange={e => setNewParent(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addParent(); } }}
+          placeholder="New category..."
+          className="flex-1 px-2 py-1 text-xs border border-stone-300 dark:border-stone-600 rounded bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200"
+        />
+        <button type="button" onClick={addParent} className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 px-1">+ Category</button>
+      </div>
     </div>
   );
 }

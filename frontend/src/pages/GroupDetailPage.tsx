@@ -365,7 +365,9 @@ export default function GroupDetailPage() {
   }, [items, sortField, sortDir]);
 
   if (loading) {
-    return <div className="text-stone-400 dark:text-stone-500 text-center py-12">Loading...</div>;
+    return (
+      <div />
+    );
   }
 
   if (!group) {
@@ -373,7 +375,7 @@ export default function GroupDetailPage() {
   }
 
   return (
-    <div>
+    <div className="animate-content-in">
       {/* Header */}
       <div className="flex items-center gap-2 text-sm text-stone-400 dark:text-stone-500 mb-4">
         <Link to="/groups" className="hover:text-stone-600 dark:hover:text-stone-300">Collections</Link>
@@ -593,21 +595,25 @@ export default function GroupDetailPage() {
             All ({items.length})
           </button>
           {schemas.map(s => (
-            <div key={s.id} className="flex items-center gap-1">
+            <div key={s.id} className="flex items-stretch group/schema">
               <button
                 onClick={() => setSelectedSchema(selectedSchema === s.id ? undefined : s.id)}
-                className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                  selectedSchema === s.id ? 'bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900' : 'bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700'
+                className={`px-3 py-1.5 rounded-l-full text-sm transition-colors ${
+                  selectedSchema === s.id ? 'bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900' : 'bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 border-r-0 text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700'
                 }`}
               >
                 {s.name} ({s.item_count})
               </button>
               <Link
                 to={`/groups/${gid}/schemas/${s.id}`}
-                className="text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 text-sm"
+                className={`px-2.5 py-1.5 rounded-r-full text-sm transition-colors flex items-center border-l ${
+                  selectedSchema === s.id ? 'bg-stone-800 dark:bg-stone-200 border-stone-600 dark:border-stone-400 text-white/60 dark:text-stone-900/60 hover:text-white dark:hover:text-stone-900' : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 border border-l-stone-300 dark:border-l-stone-600 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700'
+                }`}
                 title="Edit schema"
               >
-                ✎
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
               </Link>
             </div>
           ))}
@@ -699,7 +705,7 @@ export default function GroupDetailPage() {
           ))}
         </div>
       ) : (
-        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} />
+        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} onBulkDeleted={loadItems} />
       )}
 
       {/* Create Item Modal */}
@@ -718,13 +724,20 @@ export default function GroupDetailPage() {
   );
 }
 
-function ItemTable({ items, groupId, schemas, onDelete, onDuplicate }: {
+function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDeleted }: {
   items: Item[];
   groupId: number;
   schemas: ItemSchema[];
   onDelete: (id: number) => void;
   onDuplicate: (item: Item) => void;
+  onBulkDeleted: () => void;
 }) {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [groupEditOpen, setGroupEditOpen] = useState(false);
+  const [groupEditData, setGroupEditData] = useState<Record<string, unknown>>({});
+  const [groupEditDirty, setGroupEditDirty] = useState<Set<string>>(new Set());
+  const [groupEditSaving, setGroupEditSaving] = useState(false);
   const schemaMap = new Map(schemas.map(schema => [schema.id, schema]));
 
   function getImageFieldNames(item: Item): Set<string> {
@@ -770,11 +783,115 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate }: {
   });
   const fields = Array.from(allFields);
 
+  function toggleItem(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === items.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(items.map(i => i.id)));
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selected.size === 0) return;
+    if (!confirm(`Delete ${selected.size} item${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      for (const id of selected) {
+        await api.items.delete(groupId, id);
+      }
+      // Reload items after bulk delete
+      setSelected(new Set());
+      onBulkDeleted();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // Group Edit: check if all selected items share the same schema
+  const selectedItems = items.filter(i => selected.has(i.id));
+  const selectedSchemaIds = new Set(selectedItems.map(i => i.schema_id));
+  const canGroupEdit = selected.size > 0 && selectedSchemaIds.size === 1;
+  const groupEditSchema = canGroupEdit ? schemaMap.get([...selectedSchemaIds][0]) : null;
+
+  function openGroupEdit() {
+    if (!groupEditSchema) return;
+    setGroupEditData({});
+    setGroupEditDirty(new Set());
+    setGroupEditOpen(true);
+  }
+
+  function updateGroupEditField(field: string, value: unknown) {
+    setGroupEditData(prev => ({ ...prev, [field]: value }));
+    setGroupEditDirty(prev => new Set(prev).add(field));
+  }
+
+  async function handleGroupEditSave() {
+    if (groupEditDirty.size === 0) return;
+    setGroupEditSaving(true);
+    try {
+      const patch: Record<string, unknown> = {};
+      for (const f of groupEditDirty) {
+        patch[f] = groupEditData[f];
+      }
+      for (const item of selectedItems) {
+        const merged = { ...item.data, ...patch };
+        await api.items.update(groupId, item.id, { data: merged });
+      }
+      setGroupEditOpen(false);
+      setSelected(new Set());
+      onBulkDeleted(); // reload items
+    } finally {
+      setGroupEditSaving(false);
+    }
+  }
+
   return (
     <div className="overflow-x-auto">
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 mb-2 px-3 py-2 bg-stone-100 dark:bg-stone-800 rounded-lg">
+          <span className="text-sm text-stone-600 dark:text-stone-300">{selected.size} selected</span>
+          <button
+            onClick={openGroupEdit}
+            disabled={!canGroupEdit}
+            className={`px-3 py-1 text-sm rounded transition-colors ${canGroupEdit ? 'bg-stone-700 dark:bg-stone-300 text-white dark:text-stone-900 hover:bg-stone-600 dark:hover:bg-stone-400' : 'bg-stone-300 dark:bg-stone-600 text-stone-500 dark:text-stone-400 cursor-not-allowed'}`}
+            title={canGroupEdit ? `Edit ${selected.size} items` : 'Select items of the same schema type'}
+          >
+            Group Edit
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={deleting}
+            className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+          >
+            {deleting ? 'Deleting...' : 'Delete Selected'}
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="px-3 py-1 text-sm text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-stone-200 dark:border-stone-700">
+            <th className="py-2 px-2 w-8">
+              <input
+                type="checkbox"
+                checked={selected.size === items.length && items.length > 0}
+                onChange={toggleAll}
+                className="rounded border-stone-300 dark:border-stone-600"
+              />
+            </th>
             <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Image</th>
             <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Name</th>
             {fields.slice(0, 6).filter(f => f !== 'name').map(f => (
@@ -786,7 +903,15 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate }: {
         </thead>
         <tbody>
           {items.map(item => (
-            <tr key={item.id} className="border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50">
+            <tr key={item.id} className={`border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50 ${selected.has(item.id) ? 'bg-stone-50 dark:bg-stone-800/30' : ''}`}>
+              <td className="py-2 px-2 w-8">
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.id)}
+                  onChange={() => toggleItem(item.id)}
+                  className="rounded border-stone-300 dark:border-stone-600"
+                />
+              </td>
               <td className="py-2 px-3">
                 {item.images[0] ? (
                   <img
@@ -807,11 +932,13 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate }: {
                 </td>
               ))}
               <td className="py-2 px-3">
+                <div className="flex flex-wrap gap-1">
                 {item.tags.map(t => (
-                  <span key={t} className="inline-block bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 text-xs px-2 py-0.5 rounded-full mr-1">
+                  <span key={t} className="inline-block bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 text-xs px-2 py-0.5 rounded max-w-[120px] truncate" title={t}>
                     {t}
                   </span>
                 ))}
+                </div>
               </td>
               <td className="py-2 px-3 flex gap-1">
                 <button onClick={() => onDuplicate(item)} className="text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400" title="Duplicate">
@@ -825,8 +952,121 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate }: {
           ))}
         </tbody>
       </table>
+
+      {/* Group Edit Modal */}
+      {groupEditOpen && groupEditSchema && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in" onClick={() => setGroupEditOpen(false)}>
+          <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto m-4 animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white dark:bg-stone-900 border-b border-stone-200 dark:border-stone-700 px-5 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-stone-800 dark:text-stone-100">Group Edit</h3>
+                <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
+                  Editing {selectedItems.length} items &middot; {groupEditSchema.name} &middot; Only changed fields are applied
+                </p>
+              </div>
+              <button onClick={() => setGroupEditOpen(false)} className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-300">&times;</button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              {Object.entries(groupEditSchema.definition.sections).map(([sectionName, fields]) => (
+                <div key={sectionName}>
+                  <h4 className="text-xs font-medium text-stone-400 dark:text-stone-500 uppercase tracking-wide mb-2">{sectionName}</h4>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {Object.entries(fields).map(([fieldName, fieldDef]) => {
+                      if (fieldDef.type === 'image' || fieldDef.type === 'computed') return null;
+                      const isDirty = groupEditDirty.has(fieldName);
+                      const val = groupEditData[fieldName];
+                      return (
+                        <div key={fieldName} className={`${fieldDef.type === 'textarea' ? 'sm:col-span-2' : ''}`}>
+                          <label className="flex items-center gap-2 text-sm font-medium text-stone-600 dark:text-stone-300 mb-1">
+                            <input
+                              type="checkbox"
+                              checked={isDirty}
+                              onChange={e => {
+                                if (!e.target.checked) {
+                                  setGroupEditDirty(prev => { const n = new Set(prev); n.delete(fieldName); return n; });
+                                } else {
+                                  updateGroupEditField(fieldName, val ?? '');
+                                }
+                              }}
+                              className="rounded border-stone-300 dark:border-stone-600"
+                            />
+                            {fieldName}
+                          </label>
+                          {isDirty && (
+                            <GroupEditFieldInput fieldDef={fieldDef} value={val} onChange={v => updateGroupEditField(fieldName, v)} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="sticky bottom-0 bg-white dark:bg-stone-900 border-t border-stone-200 dark:border-stone-700 px-5 py-3 flex justify-end gap-2">
+              <button onClick={() => setGroupEditOpen(false)} className="px-4 py-2 text-sm text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200">Cancel</button>
+              <button
+                onClick={handleGroupEditSave}
+                disabled={groupEditDirty.size === 0 || groupEditSaving}
+                className="px-4 py-2 text-sm bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50"
+              >
+                {groupEditSaving ? 'Saving...' : `Apply to ${selectedItems.length} items`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function GroupEditFieldInput({ fieldDef, value, onChange }: { fieldDef: { type: string; options?: string[]; 'dropdown-items'?: string[]; 'multiselect-items'?: string[] }; value: unknown; onChange: (v: unknown) => void }) {
+  const cls = "w-full px-3 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-400";
+  switch (fieldDef.type) {
+    case 'textarea':
+      return <textarea value={String(value ?? '')} onChange={e => onChange(e.target.value)} rows={3} className={cls} />;
+    case 'boolean':
+      return (
+        <label className="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300">
+          <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} className="rounded border-stone-300 dark:border-stone-600" />
+          {value ? 'Yes' : 'No'}
+        </label>
+      );
+    case 'dropdown': {
+      const opts = fieldDef.options || fieldDef['dropdown-items'] || [];
+      return (
+        <select value={String(value ?? '')} onChange={e => onChange(e.target.value)} className={cls}>
+          <option value="">-- Select --</option>
+          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      );
+    }
+    case 'multiselect': {
+      const opts = fieldDef['multiselect-items'] || fieldDef.options || [];
+      const selected = Array.isArray(value) ? value as string[] : [];
+      return (
+        <div className="flex flex-wrap gap-1">
+          {opts.map(o => (
+            <button key={o} type="button" onClick={() => {
+              const next = selected.includes(o) ? selected.filter(v => v !== o) : [...selected, o];
+              onChange(next);
+            }} className={`px-2 py-0.5 rounded text-xs ${selected.includes(o) ? 'bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900' : 'bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300'}`}>
+              {o}
+            </button>
+          ))}
+        </div>
+      );
+    }
+    case 'int':
+      return <input type="number" step="1" value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value ? parseInt(e.target.value) : null)} className={cls} />;
+    case 'float':
+      return <input type="number" step="any" value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value ? parseFloat(e.target.value) : null)} className={cls} />;
+    case 'date':
+      return <input type="date" value={String(value ?? '')} onChange={e => onChange(e.target.value)} className={cls} />;
+    case 'datetime':
+      return <input type="datetime-local" value={String(value ?? '')} onChange={e => onChange(e.target.value)} className={cls} />;
+    default:
+      return <input type="text" value={String(value ?? '')} onChange={e => onChange(e.target.value)} className={cls} />;
+  }
 }
 
 function formatValue(val: unknown): string {

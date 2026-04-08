@@ -40,11 +40,13 @@ export default function GroupsPage() {
   }
 
   if (loading) {
-    return <div className="text-stone-400 dark:text-stone-500 text-center py-12">Loading...</div>;
+    return (
+      <div />
+    );
   }
 
   return (
-    <div>
+    <div className="animate-content-in">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100">Collections</h1>
         <button
@@ -100,7 +102,7 @@ export default function GroupsPage() {
             <Link
               key={group.id}
               to={`/groups/${group.id}`}
-              className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-sm transition-all group overflow-hidden"
+              className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group overflow-hidden"
             >
               {group.thumbnail && (
                 <div className="h-32 bg-stone-100 dark:bg-stone-800">

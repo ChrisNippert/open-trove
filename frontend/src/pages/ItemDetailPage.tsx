@@ -173,7 +173,9 @@ export default function ItemDetailPage() {
   }
 
   if (!item || !schema) {
-    return <div className="text-stone-400 dark:text-stone-500 text-center py-12">Loading...</div>;
+    return (
+      <div />
+    );
   }
 
   const sections = schema.definition?.sections || {};
@@ -185,7 +187,7 @@ export default function ItemDetailPage() {
   }));
 
   return (
-    <div>
+    <div className="animate-content-in">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-stone-400 dark:text-stone-500 mb-4">
         <Link to="/groups" className="hover:text-stone-600 dark:hover:text-stone-300">Collections</Link>
@@ -196,6 +198,15 @@ export default function ItemDetailPage() {
       </div>
 
       <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => navigate(-1)}
+          className="p-1.5 mr-2 rounded-md text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors self-center"
+          title="Go back"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
         {editing ? (
           <input
             value={formName}
@@ -354,7 +365,58 @@ export default function ItemDetailPage() {
                     );
                   }
                   const val = editing ? formData[fieldName] : item.data[fieldName];
-                  const isWide = fd.type === 'textarea';
+                  const isMulti = (fd.max_count === 0 || (fd.max_count != null && fd.max_count > 1))
+                    && !['multiselect', 'boolean', 'textarea', 'computed', 'image'].includes(fd.type);
+                  const isWide = fd.type === 'textarea' || fd.type === 'hierarchy' || isMulti;
+
+                  if (isMulti) {
+                    const values = Array.isArray(val) ? val as unknown[] : (val != null ? [val] : []);
+                    const atMax = fd.max_count! > 0 && values.length >= fd.max_count!;
+                    return (
+                      <div key={fieldName} className="sm:col-span-2">
+                        <label className="block text-xs text-stone-400 dark:text-stone-500 mb-1">{fieldName}</label>
+                        {editing && fd.type !== 'computed' ? (
+                          <div className="space-y-2">
+                            {values.map((v, i) => (
+                              <div key={i} className="flex gap-2 items-start">
+                                <div className="flex-1">
+                                  <EditableField def={{...fd, max_count: undefined}} value={v} onChange={newV => {
+                                    const updated = [...values];
+                                    updated[i] = newV;
+                                    setFormData(prev => ({ ...prev, [fieldName]: updated }));
+                                  }} />
+                                </div>
+                                <button type="button" onClick={() => {
+                                  setFormData(prev => ({ ...prev, [fieldName]: values.filter((_, j) => j !== i) }));
+                                }} className="text-stone-400 hover:text-red-400 text-sm px-1 mt-1">&times;</button>
+                              </div>
+                            ))}
+                            {!atMax && (
+                              <button type="button" onClick={() => {
+                                setFormData(prev => ({ ...prev, [fieldName]: [...values, getDefaultForType(fd)] }));
+                              }} className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300">
+                                + Add entry
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {values.length === 0 && <span className="text-sm text-stone-400 dark:text-stone-500">&mdash;</span>}
+                            {values.map((v, i) => (
+                              fd.type === 'link' && v && typeof v === 'object' && 'id' in (v as Record<string, unknown>) ? (
+                                <div key={i}><LinkedItemValue value={v as { id: number; name: string }} groupId={fd.link_group_id || gid} /></div>
+                              ) : fd.type === 'url' && v ? (
+                                <div key={i}><a href={String(v)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300 break-all">{String(v)}</a></div>
+                              ) : (
+                                <div key={i} className="text-sm text-stone-800 dark:text-stone-200">{formatDisplay(v, fd.type)}</div>
+                              )
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={fieldName} className={isWide ? 'sm:col-span-2' : ''}>
                       <label className="block text-xs text-stone-400 dark:text-stone-500 mb-1">{fieldName}</label>
@@ -460,7 +522,7 @@ function LinkedItemValue({ value, groupId }: {
         <img
           src={api.images.thumbUrl(thumb.itemId, thumb.imageId)}
           alt=""
-          className="h-6 w-6 rounded object-cover"
+          className="h-10 w-10 rounded object-cover"
         />
       )}
       <span>{value.name}</span>
@@ -623,6 +685,9 @@ function EditableField({ def, value, onChange }: {
   if (def.type === 'link') {
     return <LinkFieldEdit def={def} value={value} onChange={onChange} />;
   }
+  if (def.type === 'hierarchy') {
+    return <HierarchyFieldEdit def={def} value={value} onChange={onChange} />;
+  }
   if (def.type === 'url') {
     return <input type="url" value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} placeholder="https://..." className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
   }
@@ -685,6 +750,53 @@ function LinkFieldEdit({ def, value, onChange }: {
       )}
     </div>
   );
+}
+
+function HierarchyFieldEdit({ def, value, onChange }: {
+  def: FieldDef;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const hierarchy = def.hierarchy_options || {};
+  const parents = Object.keys(hierarchy);
+  const strVal = typeof value === 'string' ? value : '';
+  const parts = strVal.split(' > ');
+  const selectedParent = parts[0] || '';
+  const selectedChild = parts.length > 1 ? parts.slice(1).join(' > ') : '';
+  const children = selectedParent && hierarchy[selectedParent] ? hierarchy[selectedParent] : [];
+
+  function setParent(p: string) {
+    onChange(p || '');
+  }
+
+  function setChild(c: string) {
+    if (c) onChange(`${selectedParent} > ${c}`);
+    else onChange(selectedParent);
+  }
+
+  return (
+    <div className="flex gap-2">
+      <select value={selectedParent} onChange={e => setParent(e.target.value)} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200">
+        <option value="">Select category...</option>
+        {parents.map(p => <option key={p} value={p}>{p}</option>)}
+      </select>
+      {children.length > 0 && (
+        <select value={selectedChild} onChange={e => setChild(e.target.value)} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200">
+          <option value="">Any...</option>
+          {children.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+function getDefaultForType(fd: FieldDef): unknown {
+  switch (fd.type) {
+    case 'int': case 'float': return null;
+    case 'unit': return { value: 0, unit: fd.default_unit || '' };
+    case 'link': return null;
+    default: return '';
+  }
 }
 
 function formatDisplay(val: unknown, fieldType?: string): string {

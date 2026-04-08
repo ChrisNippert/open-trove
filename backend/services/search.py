@@ -97,9 +97,16 @@ async def search_items(
     if not query.strip():
         return []
 
-    # Escape FTS5 special characters and build query
-    safe_query = query.replace('"', '""')
-    fts_query = f'"{safe_query}"'
+    # Escape FTS5 special characters and build query with prefix matching
+    safe_query = query.replace('"', '""').strip()
+    # Split into words; add prefix wildcard to last word for partial matching
+    words = safe_query.split()
+    if words:
+        terms = ['"' + w + '"' for w in words[:-1]]
+        terms.append('"' + words[-1] + '"' + '*')
+        fts_query = ' '.join(terms)
+    else:
+        fts_query = f'"{safe_query}"'
 
     sql = """
         SELECT f.item_id

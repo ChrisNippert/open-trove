@@ -88,6 +88,10 @@ export default function SearchPage() {
   const [dropdownFilters, setDropdownFilters] = useState<Record<string, string>>(() => restoredFilterState.dropdownFilters);
   const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>(() => restoredFilterState.rangeFilters);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [facetsLoading, setFacetsLoading] = useState(false);
+
+  // Range version counter to trigger search after debounce
+  const [rangeVersion, setRangeVersion] = useState(0);
 
   // Debounce ref for range inputs
   const rangeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -106,7 +110,7 @@ export default function SearchPage() {
     }
   }, [groupFilter]);
 
-  // Load facets when group changes
+  // Load facets when group or filters change (dynamic counts)
   useEffect(() => {
     const isInitialLoad = !initializedGroupRef.current;
     const previousGroup = previousGroupFilterRef.current;
@@ -114,10 +118,17 @@ export default function SearchPage() {
     previousGroupFilterRef.current = groupFilter;
 
     if (groupFilter) {
-      api.facets(groupFilter).then(data => {
+      setFacetsLoading(true);
+      const filterArray = buildFilterArray();
+      const tagParam = Array.from(selectedTags).join(',');
+      api.facets(
+        groupFilter,
+        filterArray.length ? JSON.stringify(filterArray) : undefined,
+        tagParam || undefined,
+      ).then(data => {
         setFacets(data.facets);
         setTags(data.tags);
-      });
+      }).finally(() => setFacetsLoading(false));
     } else {
       setFacets({});
       setTags([]);
@@ -129,7 +140,7 @@ export default function SearchPage() {
       setDropdownFilters({});
       setRangeFilters({});
     }
-  }, [groupFilter]);
+  }, [groupFilter, checkboxFilters, dropdownFilters, rangeVersion, selectedTags]);
 
   const buildFilterArray = useCallback(() => {
     const filters: { field: string; op: string; value: unknown }[] = [];
@@ -224,9 +235,6 @@ export default function SearchPage() {
       setRangeVersion(v => v + 1);
     }, 600);
   }
-
-  // Range version counter to trigger search after debounce
-  const [rangeVersion, setRangeVersion] = useState(0);
 
   // Run search on mount if URL has search params
   const initialSearchDone = useRef(false);
@@ -331,16 +339,9 @@ export default function SearchPage() {
         )}
         <button
           type="submit"
-          disabled={loading}
-          className="px-5 py-2.5 min-w-[112px] bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+          className="px-5 py-2.5 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300"
         >
-          <span>Search</span>
-          {loading && (
-            <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" className="opacity-25" stroke="currentColor" strokeWidth="3" />
-              <path d="M22 12a10 10 0 00-10-10" className="opacity-90" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-            </svg>
-          )}
+          Search
         </button>
       </form>
 
@@ -376,6 +377,15 @@ export default function SearchPage() {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
+            {facetsLoading && (
+              <div className="flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500 py-1">
+                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" className="opacity-25" stroke="currentColor" strokeWidth="3" />
+                  <path d="M22 12a10 10 0 00-10-10" className="opacity-75" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                Updating filters...
+              </div>
+            )}
             {/* Tags */}
             {tags.length > 0 && (
               <FilterSection title="Tags" collapsed={collapsedSections.has('_tags')} onToggle={() => toggleSection('_tags')}>
@@ -418,6 +428,46 @@ export default function SearchPage() {
                           {opt.value} ({opt.count})
                         </option>
                       ))}
+                    </select>
+                  </FilterSection>
+                );
+              }
+
+              if (facet.type === 'hierarchy') {
+                const opts = facet.options || [];
+                if (opts.length === 0) return null;
+                const selectedVal = dropdownFilters[fieldName] || '';
+                // Group options by parent for display
+                const parents: string[] = [];
+                const childrenMap: Record<string, { value: string; count: number }[]> = {};
+                for (const opt of opts) {
+                  if (opt.value.includes(' > ')) {
+                    const parent = opt.value.split(' > ')[0];
+                    if (!childrenMap[parent]) childrenMap[parent] = [];
+                    childrenMap[parent].push(opt);
+                  } else {
+                    parents.push(opt.value);
+                  }
+                }
+                return (
+                  <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
+                    <select
+                      value={selectedVal}
+                      onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                    >
+                      <option value="">Any</option>
+                      {parents.map(p => {
+                        const pOpt = opts.find(o => o.value === p);
+                        return (
+                          <optgroup key={p} label={p}>
+                            <option value={p}>{p} (all) ({pOpt?.count ?? 0})</option>
+                            {(childrenMap[p] || []).map(c => (
+                              <option key={c.value} value={c.value}>{c.value.split(' > ')[1]} ({c.count})</option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </select>
                   </FilterSection>
                 );
@@ -527,11 +577,20 @@ export default function SearchPage() {
 
         {/* Results */}
         <div className="flex-1">
-          {searched && results.length === 0 && (
+          {loading && (
+            <div className="flex items-center justify-center py-16">
+              <svg className="h-8 w-8 animate-spin text-stone-400 dark:text-stone-500" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" className="opacity-25" stroke="currentColor" strokeWidth="3" />
+                <path d="M22 12a10 10 0 00-10-10" className="opacity-90" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+            </div>
+          )}
+
+          {!loading && searched && results.length === 0 && (
             <p className="text-stone-400 dark:text-stone-500 text-center py-12">No results found.</p>
           )}
 
-          {results.length > 0 && (
+          {!loading && results.length > 0 && (
             <div className="space-y-2">
               <p className="text-sm text-stone-400 dark:text-stone-500 mb-3">{results.length} result{results.length === 1 ? '' : 's'}</p>
               {results.map(item => {

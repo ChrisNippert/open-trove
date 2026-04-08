@@ -12,6 +12,7 @@ export interface Group {
 export interface FieldDef {
   type: string;
   required?: boolean;
+  max_count?: number;
   options?: string[]; // for dropdown
   "dropdown-items"?: string[];
   "multiselect-items"?: string[];
@@ -23,6 +24,7 @@ export interface FieldDef {
   link_group_id?: number;
   link_schema_id?: number;
   placeholder?: string;
+  hierarchy_options?: Record<string, string[]>;
 }
 
 export interface SchemaSections {
@@ -57,6 +59,7 @@ export interface ItemImage {
 
 export interface Item {
   id: number;
+  uuid: string;
   group_id: number;
   schema_id: number;
   name: string;

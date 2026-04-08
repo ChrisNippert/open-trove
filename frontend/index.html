@@ -9,10 +9,15 @@
       (function () {
         try {
           var saved = localStorage.getItem('theme');
-          if (saved === 'dark') {
+          var isDark = saved === 'dark';
+          if (isDark) {
             document.documentElement.classList.add('dark');
+            document.documentElement.style.background = '#0c0a09';
+            document.documentElement.style.colorScheme = 'dark';
           } else {
             document.documentElement.classList.remove('dark');
+            document.documentElement.style.background = '#fafaf9';
+            document.documentElement.style.colorScheme = 'light';
           }
         } catch (_) {}
       })();

@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api/groups/{group_id}/items", tags=["items"])
 def _item_to_out(item: Item) -> ItemOut:
     return ItemOut(
         id=item.id,
+        uuid=item.uuid or "",
         group_id=item.group_id,
         schema_id=item.schema_id,
         name=item.name or "",
