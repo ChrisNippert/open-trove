@@ -109,3 +109,5 @@ DON'T EDIT ANYTHING BELOW THIS LINE IN THIS FILE! BELOW IS ONLY TO BE EDITED MAN
 * Add some UI animation fluff that is lightweight but makes the UX feel nice
 
 * for count, the plus and minus should be more clickable, and the number maybe typeable? Also if no other config options, please remove the config dropdown as it shows nothing
+
+* Think there is a better way to display the schema? it seems vertically verbose if you know what I mean. WHat are your thoughts?

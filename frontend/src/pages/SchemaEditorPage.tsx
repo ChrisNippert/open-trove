@@ -327,7 +327,7 @@ export default function SchemaEditorPage() {
       )}
 
       {/* Sections */}
-      <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         {Object.entries(definition.sections).map(([sectionName, fields]) => (
           <SectionEditor
             key={sectionName}
@@ -411,8 +411,8 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
   }
 
   return (
-    <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-4">
+      <div className="flex items-center justify-between mb-2">
         {editing ? (
           <input
             value={editName}
@@ -436,7 +436,7 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
         </button>
       </div>
 
-      <div className="space-y-2">
+      <div className="divide-y divide-stone-100 dark:divide-stone-700/50">
         {Object.entries(fields).map(([fieldName, fieldDef], idx) => (
           <div
             key={fieldName}
@@ -524,29 +524,31 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
   }
 
   return (
-    <div className="p-3 bg-stone-50 dark:bg-stone-750 dark:bg-stone-900/40 rounded-lg">
+    <div className="py-1.5">
       <div className="flex items-center gap-2">
         {/* Drag handle */}
-        <span className="cursor-grab active:cursor-grabbing text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400 select-none" title="Drag to reorder">⠿</span>
+        <span className="cursor-grab active:cursor-grabbing text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400 select-none flex-shrink-0" title="Drag to reorder">⠿</span>
         {/* Editable field name */}
-        {editingName ? (
-          <input
-            value={fieldName}
-            onChange={e => setFieldName(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={e => e.key === 'Enter' && commitRename()}
-            className="font-medium text-sm text-stone-700 dark:text-stone-200 bg-transparent border-b border-stone-400 dark:border-stone-500 focus:outline-none"
-            autoFocus
-          />
-        ) : (
-          <span
-            className="font-medium text-sm text-stone-700 dark:text-stone-200 cursor-pointer hover:text-stone-900 dark:hover:text-white"
-            onClick={() => { setFieldName(name); setEditingName(true); }}
-            title="Click to rename"
-          >
-            {name}
-          </span>
-        )}
+        <div className="w-40 min-w-0">
+          {editingName ? (
+            <input
+              value={fieldName}
+              onChange={e => setFieldName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={e => e.key === 'Enter' && commitRename()}
+              className="w-full font-medium text-sm text-stone-700 dark:text-stone-200 bg-transparent border-b border-stone-400 dark:border-stone-500 focus:outline-none"
+              autoFocus
+            />
+          ) : (
+            <span
+              className="block truncate font-medium text-sm text-stone-700 dark:text-stone-200 cursor-pointer hover:text-stone-900 dark:hover:text-white"
+              onClick={() => { setFieldName(name); setEditingName(true); }}
+              title={name}
+            >
+              {name}
+            </span>
+          )}
+        </div>
         <select
           value={def.type}
           onChange={e => {
@@ -561,7 +563,7 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
             }
             onChangeType(newType);
           }}
-          className="text-xs bg-stone-200 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded border-none focus:ring-1 focus:ring-stone-400 cursor-pointer"
+          className="w-24 flex-shrink-0 text-xs bg-stone-200 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded border-none focus:ring-1 focus:ring-stone-400 cursor-pointer"
         >
           {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
@@ -627,7 +629,7 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
 
       {/* Expanded config panel */}
       {expanded && (
-        <div className="mt-2 pt-2 border-t border-stone-200 dark:border-stone-700 space-y-2 text-xs">
+        <div className="mt-1.5 pt-1.5 ml-6 border-t border-stone-200 dark:border-stone-700 space-y-2 text-xs">
           {(def.type === 'dropdown') && (
             <OptionsInput
               value={def.options || def['dropdown-items'] || []}
