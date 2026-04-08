@@ -4,8 +4,8 @@ import { api } from '../api';
 import type { ItemSchema, SchemaDefinition, FieldDef, Group } from '../types';
 
 const FIELD_TYPES = [
-  'string', 'textarea', 'int', 'float', 'boolean', 'datetime',
-  'dropdown', 'multiselect', 'unit', 'computed', 'image', 'link',
+  'string', 'textarea', 'int', 'float', 'boolean', 'date', 'datetime',
+  'dropdown', 'multiselect', 'unit', 'computed', 'image', 'link', 'url',
 ];
 
 const UNIT_CATEGORIES = ['mass', 'volume', 'length', 'currency', 'count'];
@@ -38,8 +38,8 @@ export default function SchemaEditorPage() {
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [jsonImportText, setJsonImportText] = useState('');
   const [jsonError, setJsonError] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [allGroups, setAllGroups] = useState<Group[]>([]);
-  const [allSchemas, setAllSchemas] = useState<Record<number, ItemSchema[]>>({});
 
   useEffect(() => {
     loadSchema();
@@ -67,6 +67,41 @@ export default function SchemaEditorPage() {
     if (!confirm('Delete this schema and all its items?')) return;
     await api.schemas.delete(gid, sid);
     navigate(`/groups/${gid}`);
+  }
+
+  async function handleCopyJson() {
+    const jsonText = JSON.stringify(definition, null, 2);
+
+    async function fallbackCopy() {
+      const textarea = document.createElement('textarea');
+      textarea.value = jsonText;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (!copied) throw new Error('Clipboard copy failed');
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(jsonText);
+      } else {
+        await fallbackCopy();
+      }
+      setCopyFeedback('success');
+    } catch {
+      try {
+        await fallbackCopy();
+        setCopyFeedback('success');
+      } catch {
+        setCopyFeedback('error');
+      }
+    }
+
+    window.setTimeout(() => setCopyFeedback('idle'), 1500);
   }
 
   function addSection() {
@@ -217,16 +252,10 @@ export default function SchemaEditorPage() {
         />
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              navigator.clipboard.writeText(JSON.stringify(definition, null, 2));
-              const btn = document.activeElement as HTMLButtonElement;
-              const orig = btn.textContent;
-              btn.textContent = 'Copied!';
-              setTimeout(() => { btn.textContent = orig; }, 1500);
-            }}
+            onClick={() => { void handleCopyJson(); }}
             className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
           >
-            Copy JSON
+            {copyFeedback === 'success' ? 'Copied!' : copyFeedback === 'error' ? 'Copy failed' : 'Copy JSON'}
           </button>
           <button
             onClick={() => { setJsonImportText(''); setJsonError(''); setShowJsonImport(true); }}
@@ -646,7 +675,7 @@ function LinkFieldConfig({ def, allGroups, onUpdate }: {
           }}
           className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
         >
-          <option value="">Any collection</option>
+          <option value="">Select a collection</option>
           {allGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
         </select>
       </div>

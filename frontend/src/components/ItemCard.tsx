@@ -11,6 +11,8 @@ interface Props {
 export default function ItemCard({ item, groupId, onDelete }: Props) {
   const name = item.name || `Item #${item.id}`;
   const hasImage = item.images.length > 0;
+  const category = item.data.category;
+  const hasCategory = typeof category === 'string' || typeof category === 'number';
   const thumbUrl = hasImage
     ? api.images.thumbUrl(item.id, item.images[0].id)
     : null;
@@ -34,8 +36,8 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
         {/* Info */}
         <div className="p-3">
           <h3 className="font-medium text-stone-800 dark:text-stone-100 text-sm truncate">{name}</h3>
-          {item.data.category && (
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">{String(item.data.category)}</p>
+          {hasCategory && (
+            <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">{String(category)}</p>
           )}
           {item.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">

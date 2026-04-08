@@ -12,8 +12,8 @@ from sqlalchemy.orm import selectinload
 from ..models import Item, ItemTag, ItemSchema, Group
 
 
-async def export_json(db: AsyncSession, group_id: int | None = None) -> list[dict]:
-    """Export items as a list of dicts."""
+async def export_json(db: AsyncSession, group_id: int | None = None, include_schemas: bool = False) -> list[dict] | dict:
+    """Export items as a list of dicts, optionally with schemas."""
     q = select(Item).options(selectinload(Item.tags), selectinload(Item.images))
     if group_id is not None:
         q = q.where(Item.group_id == group_id)
@@ -35,6 +35,20 @@ async def export_json(db: AsyncSession, group_id: int | None = None) -> list[dic
             "created_at": item.created_at.isoformat() if item.created_at else None,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         })
+
+    if include_schemas and group_id is not None:
+        schema_q = select(ItemSchema).where(ItemSchema.group_id == group_id)
+        schema_result = await db.execute(schema_q)
+        schemas = schema_result.scalars().all()
+        exported_schemas = []
+        for s in schemas:
+            exported_schemas.append({
+                "id": s.id,
+                "name": s.name,
+                "definition": json.loads(s.definition) if s.definition else {},
+            })
+        return {"schemas": exported_schemas, "items": exported}
+
     return exported
 
 
@@ -99,6 +113,14 @@ async def import_json(
     imported = 0
     errors = []
 
+    # Parse schema definition to find image fields
+    schema_def = json.loads(schema.definition) if schema.definition else {}
+    image_fields = set()
+    for section_fields in schema_def.get("sections", {}).values():
+        for field_name, field_def in section_fields.items():
+            if isinstance(field_def, dict) and field_def.get("type") == "image":
+                image_fields.add(field_name)
+
     for i, item_data in enumerate(items_data):
         try:
             data = item_data.get("data", item_data)
@@ -110,6 +132,12 @@ async def import_json(
                 tags = []
                 if "_tags" in data:
                     tags = data.pop("_tags", [])
+
+            # Null out image fields since image files aren't imported
+            if image_fields:
+                if isinstance(data, dict):
+                    for img_field in image_fields:
+                        data.pop(img_field, None)
 
             item = Item(
                 group_id=group_id,

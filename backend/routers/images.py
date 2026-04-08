@@ -1,10 +1,12 @@
 import uuid
 import json
+import httpx
 from pathlib import Path
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from PIL import Image as PILImage
@@ -169,3 +171,68 @@ async def serve_thumbnail(item_id: int, image_id: int, db: AsyncSession = Depend
     if not thumb_path.exists():
         raise HTTPException(404, "Thumbnail not found on disk")
     return FileResponse(thumb_path, media_type="image/jpeg")
+
+
+class ImageUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/from-url", response_model=ImageOut, status_code=201)
+async def upload_image_from_url(
+    item_id: int,
+    body: ImageUrlRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download an image from a URL and attach it to an item."""
+    item = await db.get(Item, item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            resp = await client.get(body.url)
+            resp.raise_for_status()
+    except Exception:
+        raise HTTPException(400, "Could not download image from URL")
+
+    content_type = resp.headers.get("content-type", "").split(";")[0].strip()
+    if content_type not in ALLOWED_MIME:
+        raise HTTPException(400, f"URL does not point to an allowed image type. Got: {content_type}")
+
+    content = resp.content
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(400, f"Image too large. Max size: {MAX_IMAGE_SIZE // (1024*1024)}MB")
+
+    # Extract filename from URL
+    url_path = body.url.split("?")[0].split("#")[0]
+    original_name = url_path.rsplit("/", 1)[-1] or "image.jpg"
+
+    filename = _generate_filename(original_name)
+    file_path = IMAGES_DIR / filename
+    file_path.write_bytes(content)
+
+    thumb_filename = _generate_filename(original_name, "_thumb")
+    thumb_path = IMAGES_DIR / thumb_filename
+    actual_thumb = _create_thumbnail(file_path, thumb_path)
+
+    result = await db.execute(
+        select(ItemImage.sort_order)
+        .where(ItemImage.item_id == item_id)
+        .order_by(ItemImage.sort_order.desc())
+        .limit(1)
+    )
+    max_order = result.scalar() or 0
+
+    image = ItemImage(
+        item_id=item_id,
+        filename=filename,
+        original_filename=original_name,
+        thumbnail_filename=actual_thumb,
+        size_bytes=len(content),
+        mime_type=content_type,
+        sort_order=max_order + 1,
+    )
+    db.add(image)
+    await db.commit()
+    await db.refresh(image)
+    return ImageOut.model_validate(image)

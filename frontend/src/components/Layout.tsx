@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
 function useDarkMode() {
@@ -12,18 +12,38 @@ function useDarkMode() {
 
 export default function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/');
   const [dark, toggleDark] = useDarkMode();
+
+  function goBack() {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate('/groups');
+  }
 
   return (
     <div className="min-h-screen bg-stone-50 dark:bg-stone-950 transition-colors">
       <nav className="bg-white dark:bg-stone-900 border-b border-stone-200 dark:border-stone-800 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14">
-            <Link to="/" className="text-lg font-semibold text-stone-800 dark:text-stone-100 tracking-tight">
-              Open Trove
-            </Link>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={goBack}
+                className="p-1.5 rounded-md text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+                title="Go back"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <Link to="/" className="text-lg font-semibold text-stone-800 dark:text-stone-100 tracking-tight">
+                Open Trove
+              </Link>
+            </div>
             <div className="flex items-center gap-1">
               <NavLink to="/groups" active={isActive('/groups')}>
                 Collections

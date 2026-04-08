@@ -153,8 +153,26 @@ async def update_item(group_id: int, item_id: int, body: ItemUpdate, db: AsyncSe
 
 @router.delete("/{item_id}", status_code=204)
 async def delete_item(group_id: int, item_id: int, db: AsyncSession = Depends(get_db)):
-    item = await db.get(Item, item_id)
-    if not item or item.group_id != group_id:
+    from ..config import IMAGES_DIR
+
+    result = await db.execute(
+        select(Item)
+        .options(selectinload(Item.images))
+        .where(Item.id == item_id, Item.group_id == group_id)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
         raise HTTPException(404, "Item not found")
+
+    # Clean up image files from disk
+    for img in (item.images or []):
+        file_path = IMAGES_DIR / img.filename
+        if file_path.exists():
+            file_path.unlink()
+        if img.thumbnail_filename:
+            thumb_path = IMAGES_DIR / img.thumbnail_filename
+            if thumb_path.exists():
+                thumb_path.unlink()
+
     await db.delete(item)
     await db.commit()

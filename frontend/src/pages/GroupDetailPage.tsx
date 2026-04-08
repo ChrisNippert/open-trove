@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import type { Group, ItemSchema, Item } from '../types';
 import ItemCard from '../components/ItemCard';
@@ -111,7 +111,6 @@ const SCHEMA_TEMPLATES: { name: string; description: string; definition: object 
 export default function GroupDetailPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const gid = Number(groupId);
-  const navigate = useNavigate();
 
   const [group, setGroup] = useState<Group | null>(null);
   const [schemas, setSchemas] = useState<ItemSchema[]>([]);
@@ -127,6 +126,11 @@ export default function GroupDetailPage() {
   const [schemaJsonImport, setSchemaJsonImport] = useState(false);
   const [schemaJsonText, setSchemaJsonText] = useState('');
   const [schemaJsonError, setSchemaJsonError] = useState('');
+  const [editingGroup, setEditingGroup] = useState(false);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDesc, setEditGroupDesc] = useState('');
+  const [sortField, setSortField] = useState<string>('');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     loadData();
@@ -207,6 +211,30 @@ export default function GroupDetailPage() {
     setItems(prev => prev.filter(i => i.id !== itemId));
   }
 
+  async function handleDuplicateItem(item: Item) {
+    try {
+      await api.items.create(gid, {
+        name: `${item.name} (copy)`,
+        schema_id: item.schema_id,
+        data: { ...item.data },
+        tags: [...item.tags],
+      });
+      loadItems();
+    } catch {
+      alert('Failed to duplicate item');
+    }
+  }
+
+  async function handleSaveGroupEdit() {
+    if (!editGroupName.trim()) return;
+    const updated = await api.groups.update(gid, {
+      name: editGroupName.trim(),
+      description: editGroupDesc,
+    });
+    setGroup(prev => prev ? { ...prev, name: updated.name, description: updated.description } : prev);
+    setEditingGroup(false);
+  }
+
   function handleImportClick() {
     if (schemas.length === 0) return;
     if (schemas.length === 1) {
@@ -261,6 +289,81 @@ export default function GroupDetailPage() {
     input.click();
   }
 
+  async function handleBundleImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const result = await api.export.importBundle(gid, file);
+        setImportResult(result);
+        loadData();
+      } catch {
+        setImportResult({ imported: 0, errors: ['Bundle import failed'] });
+      }
+      input.remove();
+    };
+    input.click();
+  }
+
+  // Collect sortable field names from all schemas
+  const sortableFields = useMemo(() => {
+    const fields = new Set<string>();
+    schemas.forEach(s => {
+      const def = s.definition as { sections?: Record<string, Record<string, { type: string }>> };
+      if (def.sections) {
+        Object.values(def.sections).forEach(section => {
+          Object.entries(section).forEach(([name, fd]) => {
+            if (['string', 'int', 'float', 'date', 'datetime', 'dropdown', 'unit'].includes(fd.type)) {
+              fields.add(name);
+            }
+          });
+        });
+      }
+    });
+    return Array.from(fields).sort();
+  }, [schemas]);
+
+  // Sort items
+  const sortedItems = useMemo(() => {
+    const arr = [...items];
+    if (!sortField) {
+      // Default: sort by id (date added)
+      arr.sort((a, b) => sortDir === 'asc' ? a.id - b.id : b.id - a.id);
+      return arr;
+    }
+    if (sortField === 'name') {
+      arr.sort((a, b) => {
+        const av = (a.name || '').toLowerCase();
+        const bv = (b.name || '').toLowerCase();
+        return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+      return arr;
+    }
+    arr.sort((a, b) => {
+      let av = a.data[sortField];
+      let bv = b.data[sortField];
+      // Handle unit values
+      if (av && typeof av === 'object' && 'value' in av) av = (av as { value: number }).value;
+      if (bv && typeof bv === 'object' && 'value' in bv) bv = (bv as { value: number }).value;
+      // Nulls last
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      // Numeric comparison
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortDir === 'asc' ? av - bv : bv - av;
+      }
+      // String comparison
+      const as = String(av).toLowerCase();
+      const bs = String(bv).toLowerCase();
+      return sortDir === 'asc' ? as.localeCompare(bs) : bs.localeCompare(as);
+    });
+    return arr;
+  }, [items, sortField, sortDir]);
+
   if (loading) {
     return <div className="text-stone-400 dark:text-stone-500 text-center py-12">Loading...</div>;
   }
@@ -313,8 +416,38 @@ export default function GroupDetailPage() {
             </button>
           </div>
           <div>
-            <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100">{group.name}</h1>
-            {group.description && <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">{group.description}</p>}
+            {editingGroup ? (
+              <div className="space-y-2">
+                <input
+                  value={editGroupName}
+                  onChange={e => setEditGroupName(e.target.value)}
+                  className="text-2xl font-semibold text-stone-800 dark:text-stone-100 bg-transparent border-b border-stone-300 dark:border-stone-600 focus:border-stone-500 focus:outline-none w-full"
+                  autoFocus
+                />
+                <input
+                  value={editGroupDesc}
+                  onChange={e => setEditGroupDesc(e.target.value)}
+                  className="text-sm text-stone-400 dark:text-stone-500 bg-transparent border-b border-stone-300 dark:border-stone-600 focus:border-stone-500 focus:outline-none w-full"
+                  placeholder="Description (optional)"
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleSaveGroupEdit} className="px-3 py-1 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded text-xs font-medium">Save</button>
+                  <button onClick={() => setEditingGroup(false)} className="px-3 py-1 text-stone-400 text-xs">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="group/name">
+                <h1
+                  className="text-2xl font-semibold text-stone-800 dark:text-stone-100 cursor-pointer hover:text-stone-600 dark:hover:text-stone-300"
+                  onClick={() => { setEditGroupName(group.name); setEditGroupDesc(group.description || ''); setEditingGroup(true); }}
+                  title="Click to edit"
+                >
+                  {group.name}
+                  <span className="text-sm font-normal text-stone-300 dark:text-stone-600 ml-2 opacity-0 group-hover/name:opacity-100">✎</span>
+                </h1>
+                {group.description && <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">{group.description}</p>}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex gap-2">
@@ -322,7 +455,14 @@ export default function GroupDetailPage() {
             href={api.export.jsonUrl(gid)}
             className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
           >
-            Export JSON
+            Export Data
+          </a>
+          <a
+            href={api.export.jsonUrl(gid, true)}
+            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+            title="Export with schemas and data"
+          >
+            Export Bundle
           </a>
           {schemas.length === 1 ? (
             <button
@@ -355,6 +495,13 @@ export default function GroupDetailPage() {
               )}
             </div>
           ) : null}
+          <button
+            onClick={handleBundleImport}
+            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
+            title="Import a bundle with schemas and items"
+          >
+            Import Bundle
+          </button>
           <button
             onClick={() => setShowCreateItem(true)}
             className="px-4 py-2 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300"
@@ -467,8 +614,8 @@ export default function GroupDetailPage() {
         </div>
       </div>
 
-      {/* View mode toggle */}
-      <div className="flex items-center gap-2 mb-4">
+      {/* View mode toggle + sort */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <button
           onClick={() => setViewMode('grid')}
           className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-stone-200 dark:bg-stone-700' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}
@@ -487,7 +634,26 @@ export default function GroupDetailPage() {
             <path fillRule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v2H5a1 1 0 01-1-1zm7 1h4a1 1 0 001-1v-1h-5v2zm0-4h5V8h-5v2zM9 8H4v2h5V8z" clipRule="evenodd" />
           </svg>
         </button>
-        <span className="text-sm text-stone-400 dark:text-stone-500 ml-2">{items.length} items</span>
+        <span className="text-sm text-stone-400 dark:text-stone-500 ml-2">{sortedItems.length} items</span>
+        <div className="ml-auto flex items-center gap-2">
+          <label className="text-xs text-stone-400 dark:text-stone-500">Sort by:</label>
+          <select
+            value={sortField}
+            onChange={e => setSortField(e.target.value)}
+            className="px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200"
+          >
+            <option value="">Date Added</option>
+            <option value="name">Name</option>
+            {sortableFields.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <button
+            onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
+            className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 px-1"
+            title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
+          >
+            {sortDir === 'asc' ? '↑' : '↓'}
+          </button>
+        </div>
       </div>
 
       {/* Import result banner */}
@@ -502,7 +668,7 @@ export default function GroupDetailPage() {
       )}
 
       {/* Items */}
-      {items.length === 0 ? (
+      {sortedItems.length === 0 ? (
         <div className="text-center py-16 text-stone-400 dark:text-stone-500">
           <p className="text-lg mb-2">No items yet</p>
           <p className="text-sm">
@@ -513,17 +679,27 @@ export default function GroupDetailPage() {
         </div>
       ) : viewMode === 'grid' ? (
         <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-          {items.map(item => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              groupId={gid}
-              onDelete={() => handleDeleteItem(item.id)}
-            />
+          {sortedItems.map(item => (
+            <div key={item.id} className="relative group/card">
+              <ItemCard
+                item={item}
+                groupId={gid}
+                onDelete={() => handleDeleteItem(item.id)}
+              />
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDuplicateItem(item); }}
+                className="absolute top-2 left-2 opacity-0 group-hover/card:opacity-100 transition-opacity bg-white/80 dark:bg-stone-800/80 backdrop-blur rounded p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
+                title="Duplicate item"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
       ) : (
-        <ItemTable items={items} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} />
+        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} />
       )}
 
       {/* Create Item Modal */}
@@ -542,12 +718,51 @@ export default function GroupDetailPage() {
   );
 }
 
-function ItemTable({ items, groupId, schemas, onDelete }: {
+function ItemTable({ items, groupId, schemas, onDelete, onDuplicate }: {
   items: Item[];
   groupId: number;
   schemas: ItemSchema[];
   onDelete: (id: number) => void;
+  onDuplicate: (item: Item) => void;
 }) {
+  const schemaMap = new Map(schemas.map(schema => [schema.id, schema]));
+
+  function getImageFieldNames(item: Item): Set<string> {
+    const schema = schemaMap.get(item.schema_id);
+    const fields = new Set<string>();
+    if (!schema?.definition?.sections) return fields;
+
+    for (const section of Object.values(schema.definition.sections)) {
+      for (const [fieldName, fieldDef] of Object.entries(section)) {
+        if (fieldDef.type === 'image') {
+          fields.add(fieldName);
+        }
+      }
+    }
+
+    return fields;
+  }
+
+  function renderCellValue(item: Item, field: string) {
+    const imageFieldNames = getImageFieldNames(item);
+    const value = item.data[field];
+
+    if (imageFieldNames.has(field) && typeof value === 'number') {
+      const match = item.images.find(image => image.id === value);
+      if (!match) return '';
+
+      return (
+        <img
+          src={api.images.thumbUrl(item.id, match.id)}
+          alt=""
+          className="h-10 w-10 rounded object-cover"
+        />
+      );
+    }
+
+    return formatValue(value);
+  }
+
   // Collect all unique field names across items
   const allFields = new Set<string>();
   items.forEach(item => {
@@ -560,6 +775,7 @@ function ItemTable({ items, groupId, schemas, onDelete }: {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-stone-200 dark:border-stone-700">
+            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Image</th>
             <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Name</th>
             {fields.slice(0, 6).filter(f => f !== 'name').map(f => (
               <th key={f} className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">{f}</th>
@@ -572,13 +788,22 @@ function ItemTable({ items, groupId, schemas, onDelete }: {
           {items.map(item => (
             <tr key={item.id} className="border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50">
               <td className="py-2 px-3">
+                {item.images[0] ? (
+                  <img
+                    src={api.images.thumbUrl(item.id, item.images[0].id)}
+                    alt=""
+                    className="h-10 w-10 rounded object-cover"
+                  />
+                ) : null}
+              </td>
+              <td className="py-2 px-3">
                 <Link to={`/groups/${groupId}/items/${item.id}`} className="text-stone-800 dark:text-stone-200 hover:underline font-medium">
                   {item.name || `Item #${item.id}`}
                 </Link>
               </td>
               {fields.slice(0, 6).filter(f => f !== 'name').map(f => (
                 <td key={f} className="py-2 px-3 text-stone-600 dark:text-stone-400">
-                  {formatValue(item.data[f])}
+                  {renderCellValue(item, f)}
                 </td>
               ))}
               <td className="py-2 px-3">
@@ -588,7 +813,10 @@ function ItemTable({ items, groupId, schemas, onDelete }: {
                   </span>
                 ))}
               </td>
-              <td className="py-2 px-3">
+              <td className="py-2 px-3 flex gap-1">
+                <button onClick={() => onDuplicate(item)} className="text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400" title="Duplicate">
+                  ⧉
+                </button>
                 <button onClick={() => onDelete(item.id)} className="text-stone-300 dark:text-stone-600 hover:text-red-400">
                   ✕
                 </button>

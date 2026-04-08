@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
-import type { Group, Item } from '../types';
+import type { Group, Item, ItemSchema } from '../types';
 
 interface FacetOption {
   value: string;
@@ -24,10 +24,56 @@ interface TagFacet {
   count: number;
 }
 
+function parseTagSelection(rawTags: string | null): Set<string> {
+  if (!rawTags) return new Set();
+  return new Set(rawTags.split(',').map(tag => tag.trim()).filter(Boolean));
+}
+
+function parseFilterState(rawFilters: string | null) {
+  const checkboxFilters: Record<string, Set<string>> = {};
+  const dropdownFilters: Record<string, string> = {};
+  const rangeFilters: Record<string, { min: string; max: string }> = {};
+
+  if (!rawFilters) {
+    return { checkboxFilters, dropdownFilters, rangeFilters };
+  }
+
+  try {
+    const parsed = JSON.parse(rawFilters) as Array<{ field: string; op: string; value: unknown }>;
+    for (const filter of parsed) {
+      const baseField = filter.field.endsWith('.value') ? filter.field.slice(0, -6) : filter.field;
+
+      if (filter.op === 'in' && Array.isArray(filter.value)) {
+        checkboxFilters[baseField] = new Set(filter.value.map(value => String(value)));
+        continue;
+      }
+
+      if (filter.op === '=') {
+        dropdownFilters[baseField] = String(filter.value);
+        continue;
+      }
+
+      if (filter.op === '>=' || filter.op === '<=') {
+        rangeFilters[baseField] = rangeFilters[baseField] || { min: '', max: '' };
+        if (filter.op === '>=') rangeFilters[baseField].min = String(filter.value ?? '');
+        if (filter.op === '<=') rangeFilters[baseField].max = String(filter.value ?? '');
+      }
+    }
+  } catch {
+    return { checkboxFilters: {}, dropdownFilters: {}, rangeFilters: {} };
+  }
+
+  return { checkboxFilters, dropdownFilters, rangeFilters };
+}
+
 export default function SearchPage() {
-  const [query, setQuery] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const restoredFilterState = parseFilterState(searchParams.get('filters'));
+  const [query, setQuery] = useState(searchParams.get('q') || '');
   const [groups, setGroups] = useState<Group[]>([]);
-  const [groupFilter, setGroupFilter] = useState<number | ''>('');
+  const [schemas, setSchemas] = useState<ItemSchema[]>([]);
+  const [groupFilter, setGroupFilter] = useState<number | ''>(searchParams.get('group_id') ? Number(searchParams.get('group_id')) : '');
+  const [schemaFilter, setSchemaFilter] = useState<number | ''>(searchParams.get('schema_id') ? Number(searchParams.get('schema_id')) : '');
   const [results, setResults] = useState<Item[]>([]);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -37,19 +83,36 @@ export default function SearchPage() {
   const [tags, setTags] = useState<TagFacet[]>([]);
 
   // Filter state
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
-  const [checkboxFilters, setCheckboxFilters] = useState<Record<string, Set<string>>>({});
-  const [dropdownFilters, setDropdownFilters] = useState<Record<string, string>>({});
-  const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>({});
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(() => parseTagSelection(searchParams.get('tag')));
+  const [checkboxFilters, setCheckboxFilters] = useState<Record<string, Set<string>>>(() => restoredFilterState.checkboxFilters);
+  const [dropdownFilters, setDropdownFilters] = useState<Record<string, string>>(() => restoredFilterState.dropdownFilters);
+  const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>(() => restoredFilterState.rangeFilters);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
   // Debounce ref for range inputs
   const rangeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const initializedGroupRef = useRef(false);
+  const previousGroupFilterRef = useRef<number | ''>(groupFilter);
 
   useEffect(() => { api.groups.list().then(setGroups); }, []);
 
+  // Load schemas when group changes
+  useEffect(() => {
+    if (groupFilter) {
+      api.schemas.list(groupFilter).then(setSchemas);
+    } else {
+      setSchemas([]);
+      setSchemaFilter('');
+    }
+  }, [groupFilter]);
+
   // Load facets when group changes
   useEffect(() => {
+    const isInitialLoad = !initializedGroupRef.current;
+    const previousGroup = previousGroupFilterRef.current;
+    initializedGroupRef.current = true;
+    previousGroupFilterRef.current = groupFilter;
+
     if (groupFilter) {
       api.facets(groupFilter).then(data => {
         setFacets(data.facets);
@@ -59,10 +122,13 @@ export default function SearchPage() {
       setFacets({});
       setTags([]);
     }
-    setSelectedTags(new Set());
-    setCheckboxFilters({});
-    setDropdownFilters({});
-    setRangeFilters({});
+
+    if (!isInitialLoad && previousGroup !== groupFilter) {
+      setSelectedTags(new Set());
+      setCheckboxFilters({});
+      setDropdownFilters({});
+      setRangeFilters({});
+    }
   }, [groupFilter]);
 
   const buildFilterArray = useCallback(() => {
@@ -101,8 +167,21 @@ export default function SearchPage() {
         tag: tagParam || undefined,
         filters: filterArray.length ? JSON.stringify(filterArray) : undefined,
       });
-      setResults(res);
+      // Filter by schema on the client side if selected
+      const filtered = schemaFilter
+        ? res.filter(item => item.schema_id === schemaFilter)
+        : res;
+      setResults(filtered);
       setSearched(true);
+
+      // Update URL params
+      const params = new URLSearchParams();
+      if (query.trim()) params.set('q', query.trim());
+      if (groupFilter) params.set('group_id', String(groupFilter));
+      if (schemaFilter) params.set('schema_id', String(schemaFilter));
+      if (tagParam) params.set('tag', tagParam);
+      if (filterArray.length) params.set('filters', JSON.stringify(filterArray));
+      setSearchParams(params, { replace: true });
     } finally {
       setLoading(false);
     }
@@ -149,6 +228,16 @@ export default function SearchPage() {
   // Range version counter to trigger search after debounce
   const [rangeVersion, setRangeVersion] = useState(0);
 
+  // Run search on mount if URL has search params
+  const initialSearchDone = useRef(false);
+  useEffect(() => {
+    if (!initialSearchDone.current && (searchParams.get('q') || searchParams.get('group_id') || searchParams.get('schema_id') || searchParams.get('tag') || searchParams.get('filters'))) {
+      initialSearchDone.current = true;
+      // Let facets load first, then search
+      setTimeout(() => doSearch(), 300);
+    }
+  }, []);
+
   // Toggle section collapse
   function toggleSection(name: string) {
     setCollapsedSections(prev => {
@@ -175,7 +264,7 @@ export default function SearchPage() {
     if (hasTags || hasCheckboxes || hasDropdowns || hasRanges || searched) {
       doSearch();
     }
-  }, [selectedTags, checkboxFilters, dropdownFilters, rangeVersion]);
+  }, [selectedTags, checkboxFilters, dropdownFilters, rangeVersion, schemaFilter]);
 
   function fieldDisplay(data: Record<string, unknown>) {
     const entries = Object.entries(data).slice(0, 4);
@@ -230,8 +319,28 @@ export default function SearchPage() {
           <option value="">All Collections</option>
           {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
         </select>
-        <button type="submit" disabled={loading} className="px-5 py-2.5 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50">
-          {loading ? '...' : 'Search'}
+        {schemas.length > 0 && (
+          <select
+            value={schemaFilter}
+            onChange={e => setSchemaFilter(e.target.value ? Number(e.target.value) : '')}
+            className="px-3 py-2.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          >
+            <option value="">Any Schema</option>
+            {schemas.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
+        <button
+          type="submit"
+          disabled={loading}
+          className="px-5 py-2.5 min-w-[112px] bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+        >
+          <span>Search</span>
+          {loading && (
+            <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" className="opacity-25" stroke="currentColor" strokeWidth="3" />
+              <path d="M22 12a10 10 0 00-10-10" className="opacity-90" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          )}
         </button>
       </form>
 
@@ -369,6 +478,8 @@ export default function SearchPage() {
               }
 
               if (facet.type === 'int' || facet.type === 'float' || facet.type === 'unit') {
+                // Hide range filter if min equals max (single value)
+                if (facet.min != null && facet.max != null && facet.min === facet.max) return null;
                 const range = rangeFilters[fieldName] || { min: '', max: '' };
                 const unitLabel = facet.unit ? ` (${facet.unit})` : '';
                 return (

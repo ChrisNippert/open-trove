@@ -12,6 +12,16 @@ from ..services.search import search_items, filter_items_by_field
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
+def _normalize_filter_value(value):
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return 1
+        if lowered == "false":
+            return 0
+    return value
+
+
 def _item_to_out(item: Item) -> ItemOut:
     return ItemOut(
         id=item.id,
@@ -105,8 +115,9 @@ async def search(
             if f_op.lower() == "in" and isinstance(f_value, list):
                 combined_ids: set[int] = set()
                 for val in f_value:
+                    normalized = _normalize_filter_value(val)
                     ids = set(await filter_items_by_field(
-                        db, group_id, f_field, "=", val, limit=500
+                        db, group_id, f_field, "=", normalized, limit=500
                     ))
                     combined_ids.update(ids)
                 if item_ids is not None:
@@ -119,6 +130,8 @@ async def search(
                 parsed_val = float(f_value) if isinstance(f_value, str) else f_value
             except (ValueError, TypeError):
                 parsed_val = f_value
+
+            parsed_val = _normalize_filter_value(parsed_val)
             f_ids = set(await filter_items_by_field(
                 db, group_id, f_field, f_op, parsed_val, limit=500
             ))
@@ -186,13 +199,23 @@ async def get_facets(
                         or field_def.get("multiselect-items")
                         or []
                     )
-                    # Count items per option value
-                    count_result = await db.execute(text(
-                        "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
-                        "FROM items WHERE group_id = :gid "
-                        "AND json_extract(data, :path) IS NOT NULL "
-                        "GROUP BY val"
-                    ), {"path": f"$.{field_name}", "gid": group_id})
+                    if ftype == "multiselect":
+                        # For multiselect, values are JSON arrays — expand them via json_each
+                        count_result = await db.execute(text(
+                            "SELECT j.value as val, COUNT(DISTINCT items.id) as cnt "
+                            "FROM items, json_each(json_extract(items.data, :path)) j "
+                            "WHERE items.group_id = :gid "
+                            "AND json_type(items.data, :path) = 'array' "
+                            "GROUP BY j.value"
+                        ), {"path": f"$.{field_name}", "gid": group_id})
+                    else:
+                        # Count items per option value
+                        count_result = await db.execute(text(
+                            "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
+                            "FROM items WHERE group_id = :gid "
+                            "AND json_extract(data, :path) IS NOT NULL "
+                            "GROUP BY val"
+                        ), {"path": f"$.{field_name}", "gid": group_id})
                     value_counts = {str(r[0]): r[1] for r in count_result.fetchall()}
                     options = [
                         {"value": opt, "count": value_counts.get(opt, 0)}

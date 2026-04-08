@@ -128,15 +128,29 @@ async def filter_items_by_field(
     limit: int = 50,
     offset: int = 0,
 ) -> list[int]:
-    """Filter items by a JSON field value. Returns item IDs."""
+    """Filter items by a JSON field value. Returns item IDs.
+
+    Handles both scalar fields and JSON array fields (e.g. multiselect).
+    For array fields, checks if `value` is contained within the array.
+    """
     valid_ops = {"=", "!=", ">", "<", ">=", "<=", "LIKE"}
     if op.upper() not in valid_ops:
         return []
 
+    # First try regular scalar match
     sql = f"""
         SELECT id FROM items
         WHERE group_id = :group_id
-        AND json_extract(data, :path) {op} :value
+        AND (
+            json_extract(data, :path) {op} :value
+            OR (
+                json_type(data, :path) = 'array'
+                AND EXISTS (
+                    SELECT 1 FROM json_each(json_extract(data, :path))
+                    WHERE value {op} :value
+                )
+            )
+        )
         ORDER BY created_at DESC
         LIMIT :limit OFFSET :offset
     """

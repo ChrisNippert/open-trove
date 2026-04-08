@@ -63,9 +63,9 @@ export const api = {
     },
     get: (groupId: number, itemId: number) =>
       request<Item>(`/groups/${groupId}/items/${itemId}`),
-    create: (groupId: number, data: { schema_id: number; data: object; tags?: string[] }) =>
+    create: (groupId: number, data: { name?: string; schema_id: number; data: object; tags?: string[] }) =>
       request<Item>(`/groups/${groupId}/items`, { method: 'POST', body: JSON.stringify(data) }),
-    update: (groupId: number, itemId: number, data: { data?: object; tags?: string[] }) =>
+    update: (groupId: number, itemId: number, data: { name?: string; data?: object; tags?: string[] }) =>
       request<Item>(`/groups/${groupId}/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (groupId: number, itemId: number) =>
       request<void>(`/groups/${groupId}/items/${itemId}`, { method: 'DELETE' }),
@@ -80,6 +80,18 @@ export const api = {
         body: form,
       });
       if (!res.ok) throw new Error('Upload failed');
+      return res.json();
+    },
+    uploadFromUrl: async (itemId: number, url: string) => {
+      const res = await fetch(`${BASE}/items/${itemId}/images/from-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Failed to download image' }));
+        throw new Error(err.detail || 'Failed to download image from URL');
+      }
       return res.json();
     },
     list: (itemId: number) => request<Item['images']>(`/items/${itemId}/images`),
@@ -125,7 +137,13 @@ export const api = {
   },
 
   export: {
-    jsonUrl: (groupId?: number) => `${BASE}/export/json${groupId ? `?group_id=${groupId}` : ''}`,
+    jsonUrl: (groupId?: number, includeSchemas?: boolean) => {
+      const params = new URLSearchParams();
+      if (groupId) params.set('group_id', String(groupId));
+      if (includeSchemas) params.set('include_schemas', 'true');
+      const qs = params.toString();
+      return `${BASE}/export/json${qs ? `?${qs}` : ''}`;
+    },
     csvUrl: (groupId: number, schemaId: number) => `${BASE}/export/csv?group_id=${groupId}&schema_id=${schemaId}`,
     importJson: async (groupId: number, schemaId: number, file: File) => {
       const form = new FormData();
@@ -144,6 +162,15 @@ export const api = {
       });
       if (!res.ok) throw new Error('Import failed');
       return res.json() as Promise<ImportResult>;
+    },
+    importBundle: async (groupId: number, file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE}/export/import/bundle?group_id=${groupId}`, {
+        method: 'POST', body: form,
+      });
+      if (!res.ok) throw new Error('Import failed');
+      return res.json() as Promise<{ schemas_created: number; imported: number; errors: string[] }>;
     },
   },
 };

@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import ImageSourceModal, { type ImageSourceOption } from '../components/ImageSourceModal';
 import type { Item, ItemSchema, FieldDef } from '../types';
 
 export default function ItemDetailPage() {
@@ -11,36 +12,93 @@ export default function ItemDetailPage() {
 
   const [item, setItem] = useState<Item | null>(null);
   const [schema, setSchema] = useState<ItemSchema | null>(null);
+  const [groupName, setGroupName] = useState('Group');
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [formName, setFormName] = useState('');
   const [formTags, setFormTags] = useState('');
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ itemId: number; imageId: number } | null>(null);
+  const [showImageSourceModal, setShowImageSourceModal] = useState(false);
+  const [imageVersion, setImageVersion] = useState(0);
+  const [notFound, setNotFound] = useState(false);
+  const pendingNamedUploadIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     loadItem();
   }, [gid, iid]);
 
+  useEffect(() => {
+    api.groups.get(gid).then(group => setGroupName(group.name)).catch(() => undefined);
+  }, [gid]);
+
+  useEffect(() => {
+    if (!editing) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (!saving) {
+          void handleSave();
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editing, saving, formData, formName, formTags]);
+
   async function loadItem() {
-    const it = await api.items.get(gid, iid);
-    setItem(it);
-    setFormData(it.data);
-    setFormTags(it.tags.join(', '));
-    const s = await api.schemas.get(gid, it.schema_id);
-    setSchema(s);
+    try {
+      const it = await api.items.get(gid, iid);
+      setItem(it);
+      setFormData(it.data);
+      setFormName(it.name || '');
+      setFormTags(it.tags.join(', '));
+      const s = await api.schemas.get(gid, it.schema_id);
+      setSchema(s);
+    } catch {
+      setNotFound(true);
+    }
+  }
+
+  // Reload only images without resetting form state
+  async function reloadImages() {
+    try {
+      const it = await api.items.get(gid, iid);
+      setItem(prev => prev ? { ...prev, images: it.images } : it);
+      setImageVersion(prev => prev + 1);
+    } catch { /* ignore */ }
   }
 
   async function handleSave() {
     setSaving(true);
     try {
       const tags = formTags.split(',').map(t => t.trim()).filter(Boolean);
-      await api.items.update(gid, iid, { data: formData, tags });
+      await api.items.update(gid, iid, { name: formName.trim(), data: formData, tags });
+      pendingNamedUploadIdsRef.current.clear();
       await loadItem();
       setEditing(false);
     } finally {
       setSaving(false);
     }
+  }
+
+  async function discardPendingNamedUploads() {
+    const pendingIds = Array.from(pendingNamedUploadIdsRef.current);
+    pendingNamedUploadIdsRef.current.clear();
+    if (pendingIds.length === 0) return;
+    await Promise.all(pendingIds.map(imageId => api.images.delete(iid, imageId).catch(() => undefined)));
+    await reloadImages();
+  }
+
+  async function handleCancelEdit() {
+    if (!item) return;
+    await discardPendingNamedUploads();
+    setFormData(item.data);
+    setFormName(item.name || '');
+    setFormTags(item.tags.join(', '));
+    setEditing(false);
   }
 
   async function handleDelete() {
@@ -49,22 +107,69 @@ export default function ItemDetailPage() {
     navigate(`/groups/${gid}`);
   }
 
-  async function handleImageUpload(files: FileList | null) {
-    if (!files) return;
-    for (const file of Array.from(files)) {
+  async function handleImageUpload(files: File[]) {
+    for (const file of files) {
       await api.images.upload(iid, file);
     }
-    loadItem();
+    await reloadImages();
+  }
+
+  async function handleImageUrlUpload(url: string) {
+    await api.images.uploadFromUrl(iid, url);
+    await reloadImages();
   }
 
   async function handleImageDelete(imageId: number) {
     await api.images.delete(iid, imageId);
-    loadItem();
+    pendingNamedUploadIdsRef.current.delete(imageId);
+    await reloadImages();
   }
 
   async function handleSetPrimary(imageId: number) {
     await api.images.setPrimary(iid, imageId);
-    loadItem();
+    await reloadImages();
+  }
+
+  async function replacePendingNamedImage(previousImageId: number | null, nextImageId: number | null) {
+    if (!previousImageId || previousImageId === nextImageId) return false;
+    if (!pendingNamedUploadIdsRef.current.has(previousImageId)) return false;
+    pendingNamedUploadIdsRef.current.delete(previousImageId);
+    await api.images.delete(iid, previousImageId).catch(() => undefined);
+    return true;
+  }
+
+  async function handleNamedImageAssign(fieldName: string, imageId: number, uploaded = false) {
+    const previousImageId = typeof formData[fieldName] === 'number' ? Number(formData[fieldName]) : null;
+    if (uploaded) {
+      pendingNamedUploadIdsRef.current.add(imageId);
+    }
+    const deletedPendingImage = await replacePendingNamedImage(previousImageId, imageId);
+    setFormData(prev => ({ ...prev, [fieldName]: imageId }));
+    if (uploaded || deletedPendingImage) {
+      await reloadImages();
+    }
+  }
+
+  async function handleNamedImageRemove(fieldName: string) {
+    const currentImageId = typeof formData[fieldName] === 'number' ? Number(formData[fieldName]) : null;
+    const deletedPendingImage = await replacePendingNamedImage(currentImageId, null);
+    setFormData(prev => ({ ...prev, [fieldName]: null }));
+    if (deletedPendingImage) {
+      await reloadImages();
+    }
+  }
+
+  if (notFound) {
+    return (
+      <div className="text-center py-16">
+        <div className="text-6xl mb-4">🔍</div>
+        <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100 mb-2">Item Not Found</h1>
+        <p className="text-stone-400 dark:text-stone-500 mb-6">This item doesn't exist or has been deleted.</p>
+        <Link to="/groups" className="px-4 py-2 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300">
+          Back to Collections
+        </Link>
+      </div>
+    );
   }
 
   if (!item || !schema) {
@@ -73,6 +178,11 @@ export default function ItemDetailPage() {
 
   const sections = schema.definition?.sections || {};
   const name = item.name || `Item #${item.id}`;
+  const itemImageOptions: ImageSourceOption[] = item.images.map((image, index) => ({
+    id: String(image.id),
+    label: image.original_filename || `Image ${index + 1}`,
+    previewUrl: `${api.images.thumbUrl(iid, image.id)}?v=${imageVersion}`,
+  }));
 
   return (
     <div>
@@ -80,13 +190,22 @@ export default function ItemDetailPage() {
       <div className="flex items-center gap-2 text-sm text-stone-400 dark:text-stone-500 mb-4">
         <Link to="/groups" className="hover:text-stone-600 dark:hover:text-stone-300">Collections</Link>
         <span>/</span>
-        <Link to={`/groups/${gid}`} className="hover:text-stone-600 dark:hover:text-stone-300">Group</Link>
+        <Link to={`/groups/${gid}`} className="hover:text-stone-600 dark:hover:text-stone-300">{groupName}</Link>
         <span>/</span>
         <span className="text-stone-600 dark:text-stone-300">{name}</span>
       </div>
 
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100">{name}</h1>
+        {editing ? (
+          <input
+            value={formName}
+            onChange={e => setFormName(e.target.value)}
+            className="text-2xl font-semibold text-stone-800 dark:text-stone-100 bg-transparent border-b border-stone-300 dark:border-stone-600 focus:border-stone-500 dark:focus:border-stone-400 focus:outline-none flex-1 mr-4"
+            placeholder="Item name"
+          />
+        ) : (
+          <h1 className="text-2xl font-semibold text-stone-800 dark:text-stone-100">{name}</h1>
+        )}
         <div className="flex gap-2">
           {editing ? (
             <>
@@ -97,7 +216,7 @@ export default function ItemDetailPage() {
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
-              <button onClick={() => { setEditing(false); setFormData(item.data); }} className="px-4 py-2 text-stone-500 dark:text-stone-400 text-sm">
+              <button onClick={() => { void handleCancelEdit(); }} className="px-4 py-2 text-stone-500 dark:text-stone-400 text-sm">
                 Cancel
               </button>
             </>
@@ -121,9 +240,11 @@ export default function ItemDetailPage() {
             <h2 className="text-sm font-medium text-stone-500 dark:text-stone-400 mb-3">Images</h2>
             <div className="grid grid-cols-2 gap-2">
               {item.images.map((img, idx) => (
-                <div key={img.id} className={`relative aspect-square rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group ${idx === 0 ? 'ring-2 ring-stone-400 dark:ring-stone-500' : ''}`}>
+                <div key={img.id} className={`relative aspect-square rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group cursor-pointer ${idx === 0 ? 'ring-2 ring-stone-400 dark:ring-stone-500' : ''}`}
+                  onClick={() => setLightboxImage({ itemId: iid, imageId: img.id })}
+                >
                   <img
-                    src={api.images.url(iid, img.id)}
+                    src={`${api.images.thumbUrl(iid, img.id)}?v=${imageVersion}`}
                     alt=""
                     className="w-full h-full object-cover"
                   />
@@ -154,27 +275,24 @@ export default function ItemDetailPage() {
                 </div>
               ))}
               <button
-                onClick={() => fileRef.current?.click()}
+                onClick={() => setShowImageSourceModal(true)}
                 className="aspect-square rounded-lg border-2 border-dashed border-stone-300 dark:border-stone-600 flex items-center justify-center text-stone-400 dark:text-stone-500 hover:border-stone-400 dark:hover:border-stone-500"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
                 </svg>
               </button>
-              <button
-                onClick={() => cameraRef.current?.click()}
-                className="aspect-square rounded-lg border-2 border-dashed border-stone-300 dark:border-stone-600 flex items-center justify-center text-stone-400 dark:text-stone-500 hover:border-stone-400 dark:hover:border-stone-500"
-                title="Take photo"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </button>
             </div>
-            <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleImageUpload(e.target.files)} />
-            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handleImageUpload(e.target.files)} />
           </div>
+
+          <ImageSourceModal
+            open={showImageSourceModal}
+            title="Add item images"
+            allowMultipleUpload
+            onClose={() => setShowImageSourceModal(false)}
+            onSelectFiles={handleImageUpload}
+            onSelectUrl={handleImageUrlUpload}
+          />
 
           {/* Tags */}
           <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 p-4 mt-4">
@@ -216,11 +334,20 @@ export default function ItemDetailPage() {
                           itemId={iid}
                           imageId={imageId || null}
                           editing={editing}
-                          onUploaded={(imgId) => {
-                            setFormData(prev => ({ ...prev, [fieldName]: imgId }));
+                          itemImages={itemImageOptions}
+                          imageVersion={imageVersion}
+                          onSelected={async (imgId) => {
+                            await handleNamedImageAssign(fieldName, imgId, false);
                           }}
-                          onRemoved={() => {
-                            setFormData(prev => ({ ...prev, [fieldName]: null }));
+                          onUploaded={async (imgId) => {
+                            await handleNamedImageAssign(fieldName, imgId, true);
+                          }}
+                          onUploadedFromUrl={async (url) => {
+                            const uploaded = await api.images.uploadFromUrl(iid, url);
+                            await handleNamedImageAssign(fieldName, uploaded.id, true);
+                          }}
+                          onRemoved={async () => {
+                            await handleNamedImageRemove(fieldName);
                           }}
                         />
                       </div>
@@ -233,21 +360,27 @@ export default function ItemDetailPage() {
                       <label className="block text-xs text-stone-400 dark:text-stone-500 mb-1">{fieldName}</label>
                       {editing && fd.type !== 'computed' ? (
                         <EditableField
-                          name={fieldName}
                           def={fd}
                           value={formData[fieldName]}
                           onChange={v => setFormData(prev => ({ ...prev, [fieldName]: v }))}
                         />
                       ) : fd.type === 'link' && val && typeof val === 'object' && 'id' in (val as Record<string, unknown>) ? (
-                        <Link
-                          to={`/groups/${(fd as FieldDef).link_group_id || gid}/items/${(val as { id: number }).id}`}
-                          className="text-sm text-stone-600 dark:text-stone-300 underline hover:text-stone-900 dark:hover:text-white"
+                        <LinkedItemValue
+                          value={val as { id: number; name: string }}
+                          groupId={(fd as FieldDef).link_group_id || gid}
+                        />
+                      ) : fd.type === 'url' && val ? (
+                        <a
+                          href={String(val)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300 break-all"
                         >
-                          {(val as { name: string }).name}
-                        </Link>
+                          {String(val)}
+                        </a>
                       ) : (
                         <div className={`text-sm text-stone-800 dark:text-stone-200 ${fd.type === 'textarea' ? 'whitespace-pre-wrap' : ''}`}>
-                          {formatDisplay(val)}
+                          {formatDisplay(val, fd.type)}
                         </div>
                       )}
                     </div>
@@ -262,18 +395,91 @@ export default function ItemDetailPage() {
       <div className="mt-6 text-xs text-stone-400 dark:text-stone-500">
         Created: {new Date(item.created_at).toLocaleString()} &middot; Updated: {new Date(item.updated_at).toLocaleString()}
       </div>
+
+      {/* Lightbox */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-8 cursor-pointer"
+          onClick={() => setLightboxImage(null)}
+        >
+          <button
+            onClick={() => setLightboxImage(null)}
+            className="absolute top-4 right-4 text-white/70 hover:text-white text-3xl z-10"
+          >
+            &times;
+          </button>
+          <img
+            src={`${api.images.url(lightboxImage.itemId, lightboxImage.imageId)}?v=${imageVersion}`}
+            alt=""
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function NamedImageField({ itemId, imageId, editing, onUploaded, onRemoved }: {
+function LinkedItemValue({ value, groupId }: {
+  value: { id: number; name: string };
+  groupId: number;
+}) {
+  const [exists, setExists] = useState<boolean | null>(null);
+  const [thumb, setThumb] = useState<{ itemId: number; imageId: number } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    api.items.get(groupId, value.id)
+      .then(item => {
+        if (!mounted) return;
+        setExists(true);
+        if (item.images?.length) {
+          setThumb({ itemId: item.id, imageId: item.images[0].id });
+        }
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setExists(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [groupId, value.id]);
+
+  if (exists === false) {
+    return <span className="text-sm text-red-500">{value.name || `Missing item #${value.id}`}</span>;
+  }
+
+  return (
+    <Link
+      to={`/groups/${groupId}/items/${value.id}`}
+      className="inline-flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300 underline hover:text-stone-900 dark:hover:text-white"
+    >
+      {thumb && (
+        <img
+          src={api.images.thumbUrl(thumb.itemId, thumb.imageId)}
+          alt=""
+          className="h-6 w-6 rounded object-cover"
+        />
+      )}
+      <span>{value.name}</span>
+    </Link>
+  );
+}
+
+function NamedImageField({ itemId, imageId, editing, itemImages, imageVersion, onSelected, onUploaded, onUploadedFromUrl, onRemoved }: {
   itemId: number;
   imageId: number | null;
   editing: boolean;
-  onUploaded: (imageId: number) => void;
-  onRemoved: () => void;
+  itemImages: ImageSourceOption[];
+  imageVersion: number;
+  onSelected: (imageId: number) => Promise<void> | void;
+  onUploaded: (imageId: number) => Promise<void> | void;
+  onUploadedFromUrl: (url: string) => Promise<void> | void;
+  onRemoved: () => Promise<void> | void;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
+  const [showPicker, setShowPicker] = useState(false);
 
   async function handleUpload(file: File) {
     const img = await api.images.upload(itemId, file);
@@ -282,34 +488,47 @@ function NamedImageField({ itemId, imageId, editing, onUploaded, onRemoved }: {
 
   if (imageId) {
     return (
-      <div className="relative w-40 h-40 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group">
-        <img src={api.images.url(itemId, imageId)} className="w-full h-full object-cover" alt="" />
-        {editing && (
-          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="absolute top-1 right-1 flex gap-1">
-              <button
-                onClick={() => ref.current?.click()}
-                className="bg-black/50 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center hover:bg-black/70"
-                title="Replace"
-              >
-                ↻
-              </button>
-              <button
-                onClick={onRemoved}
-                className="bg-black/50 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center hover:bg-red-600"
-                title="Remove"
-              >
-                &times;
-              </button>
+      <>
+        <div className="relative w-40 h-40 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group">
+          <img src={`${api.images.url(itemId, imageId)}?v=${imageVersion}`} className="w-full h-full object-cover" alt="" />
+          {editing && (
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute top-1 right-1 flex gap-1">
+                <button
+                  onClick={() => setShowPicker(true)}
+                  className="bg-black/50 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center hover:bg-black/70"
+                  title="Replace"
+                >
+                  ↻
+                </button>
+                <button
+                  onClick={() => { void onRemoved(); }}
+                  className="bg-black/50 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center hover:bg-red-600"
+                  title="Remove"
+                >
+                  &times;
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-        <input ref={ref} type="file" accept="image/*" className="hidden" onChange={e => {
-          const f = e.target.files?.[0];
-          if (f) handleUpload(f);
-          e.target.value = '';
-        }} />
-      </div>
+          )}
+        </div>
+        <ImageSourceModal
+          open={showPicker}
+          title="Choose named image"
+          onClose={() => setShowPicker(false)}
+          onSelectFiles={async files => {
+            const file = files[0];
+            if (!file) return;
+            await handleUpload(file);
+          }}
+          onSelectUrl={onUploadedFromUrl}
+          existingImages={itemImages}
+          selectedExistingImageId={String(imageId)}
+          onSelectExisting={async selectedImageId => {
+            await onSelected(Number(selectedImageId));
+          }}
+        />
+      </>
     );
   }
 
@@ -321,7 +540,7 @@ function NamedImageField({ itemId, imageId, editing, onUploaded, onRemoved }: {
     <>
       <button
         type="button"
-        onClick={() => ref.current?.click()}
+        onClick={() => setShowPicker(true)}
         className="w-40 h-40 rounded-lg border-2 border-dashed border-stone-300 dark:border-stone-600 flex flex-col items-center justify-center text-stone-400 dark:text-stone-500 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-500 dark:hover:text-stone-400"
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -329,17 +548,27 @@ function NamedImageField({ itemId, imageId, editing, onUploaded, onRemoved }: {
         </svg>
         <span className="text-xs">Add image</span>
       </button>
-      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={e => {
-        const f = e.target.files?.[0];
-        if (f) handleUpload(f);
-        e.target.value = '';
-      }} />
+      <ImageSourceModal
+        open={showPicker}
+        title="Choose named image"
+        onClose={() => setShowPicker(false)}
+        onSelectFiles={async files => {
+          const file = files[0];
+          if (!file) return;
+          await handleUpload(file);
+        }}
+        onSelectUrl={onUploadedFromUrl}
+        existingImages={itemImages}
+        selectedExistingImageId={imageId ? String(imageId) : null}
+        onSelectExisting={async selectedImageId => {
+          await onSelected(Number(selectedImageId));
+        }}
+      />
     </>
   );
 }
 
-function EditableField({ name, def, value, onChange }: {
-  name: string;
+function EditableField({ def, value, onChange }: {
   def: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
@@ -385,11 +614,17 @@ function EditableField({ name, def, value, onChange }: {
   if (def.type === 'datetime') {
     return <input type="datetime-local" value={value ? String(value) : ''} onChange={e => onChange(e.target.value)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
   }
+  if (def.type === 'date') {
+    return <input type="date" value={value ? String(value) : ''} onChange={e => onChange(e.target.value)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
+  }
   if (def.type === 'textarea') {
     return <textarea value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} rows={6} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 font-mono sm:col-span-2" />;
   }
   if (def.type === 'link') {
     return <LinkFieldEdit def={def} value={value} onChange={onChange} />;
+  }
+  if (def.type === 'url') {
+    return <input type="url" value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} placeholder="https://..." className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
   }
   return <input value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
 }
@@ -428,6 +663,8 @@ function LinkFieldEdit({ def, value, onChange }: {
         value={search}
         onChange={e => { setSearch(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); e.currentTarget.blur(); } }}
         placeholder={def.link_group_id ? 'Search items...' : 'Configure link target in schema'}
         disabled={!def.link_group_id}
         className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
@@ -450,7 +687,8 @@ function LinkFieldEdit({ def, value, onChange }: {
   );
 }
 
-function formatDisplay(val: unknown): string {
+function formatDisplay(val: unknown, fieldType?: string): string {
+  if (fieldType === 'boolean') return val === true ? 'Yes' : 'No';
   if (val == null) return '—';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
   if (Array.isArray(val)) return val.join(', ') || '—';
@@ -460,6 +698,12 @@ function formatDisplay(val: unknown): string {
   if (typeof val === 'object' && 'value' in (val as Record<string, unknown>)) {
     const v = val as { value: number; unit: string };
     return `${v.value} ${v.unit}`;
+  }
+  if (fieldType === 'date' && typeof val === 'string') {
+    try { return new Date(val + 'T00:00:00').toLocaleDateString(); } catch { return String(val); }
+  }
+  if (fieldType === 'datetime' && typeof val === 'string') {
+    try { return new Date(val).toLocaleString(); } catch { return String(val); }
   }
   return String(val);
 }

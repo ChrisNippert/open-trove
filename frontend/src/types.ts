@@ -22,6 +22,7 @@ export interface FieldDef {
   unit_from?: string;
   link_group_id?: number;
   link_schema_id?: number;
+  placeholder?: string;
 }
 
 export interface SchemaSections {
