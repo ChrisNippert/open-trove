@@ -497,6 +497,30 @@ export default function SearchPage() {
                 );
               }
 
+              if (facet.type === 'string') {
+                const opts = facet.options || [];
+                if (opts.length === 0) return null;
+                const selected = checkboxFilters[fieldName] || new Set();
+                return (
+                  <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {opts.map(opt => (
+                        <label key={opt.value} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-stone-50 dark:hover:bg-stone-800 cursor-pointer text-xs">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(opt.value)}
+                            onChange={() => toggleCheckbox(fieldName, opt.value)}
+                            className="rounded border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-300 focus:ring-stone-400 w-3.5 h-3.5"
+                          />
+                          <span className="text-stone-600 dark:text-stone-300 flex-1 truncate">{opt.value}</span>
+                          <span className="text-stone-400 dark:text-stone-500 tabular-nums">{opt.count}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </FilterSection>
+                );
+              }
+
               if (facet.type === 'boolean') {
                 const selected = checkboxFilters[fieldName] || new Set();
                 return (
@@ -598,13 +622,13 @@ export default function SearchPage() {
                 return (
                 <Link
                   key={item.id}
-                  to={`/groups/${item.group_id}/items/${item.id}`}
+                  to={`/groups/${item.group_id}/items/${item.uuid}`}
                   className="flex bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 transition-colors overflow-hidden"
                 >
                   {primaryImage && (
                     <div className="w-20 sm:w-24 shrink-0 bg-stone-100 dark:bg-stone-800 self-stretch">
                       <img
-                        src={api.images.thumbUrl(item.id, primaryImage.id)}
+                        src={api.images.thumbUrl(item.uuid, primaryImage.id)}
                         alt=""
                         className="w-full h-full object-cover"
                         loading="lazy"

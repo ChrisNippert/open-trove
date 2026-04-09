@@ -41,6 +41,10 @@ export default function SchemaEditorPage() {
   const [jsonError, setJsonError] = useState('');
   const [copyFeedback, setCopyFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [allGroups, setAllGroups] = useState<Group[]>([]);
+  const [dragSectionIdx, setDragSectionIdx] = useState<number | null>(null);
+  const [dragOverSectionIdx, setDragOverSectionIdx] = useState<number | null>(null);
+  const [dragField, setDragField] = useState<{ section: string; name: string; index: number } | null>(null);
+  const [dragOverField, setDragOverField] = useState<{ section: string; index: number } | null>(null);
 
   useEffect(() => {
     loadSchema();
@@ -134,6 +138,41 @@ export default function SchemaEditorPage() {
     });
   }
 
+  function reorderSection(fromIdx: number, toIdx: number) {
+    setDefinition(prev => {
+      const entries = Object.entries(prev.sections);
+      const [moved] = entries.splice(fromIdx, 1);
+      entries.splice(toIdx, 0, moved);
+      const reordered: Record<string, Record<string, FieldDef>> = {};
+      for (const [k, v] of entries) reordered[k] = v;
+      return { ...prev, sections: reordered };
+    });
+  }
+
+  function moveFieldToIndex(fromSection: string, fieldName: string, toSection: string, toIndex: number) {
+    setDefinition(prev => {
+      const fieldDef = prev.sections[fromSection][fieldName];
+      const fromEntries = Object.entries(prev.sections[fromSection]).filter(([k]) => k !== fieldName);
+      let toEntries: [string, FieldDef][];
+      if (fromSection === toSection) {
+        toEntries = [...fromEntries];
+      } else {
+        toEntries = Object.entries(prev.sections[toSection]);
+      }
+      const insertIdx = Math.min(toIndex, toEntries.length);
+      toEntries.splice(insertIdx, 0, [fieldName, fieldDef]);
+      const rebuild = (entries: [string, FieldDef][]) => {
+        const obj: Record<string, FieldDef> = {};
+        for (const [k, v] of entries) obj[k] = v;
+        return obj;
+      };
+      if (fromSection === toSection) {
+        return { ...prev, sections: { ...prev.sections, [toSection]: rebuild(toEntries) } };
+      }
+      return { ...prev, sections: { ...prev.sections, [fromSection]: rebuild(fromEntries), [toSection]: rebuild(toEntries) } };
+    });
+  }
+
   function addField(sectionName: string) {
     if (!newFieldName.trim()) return;
     const fieldDef: FieldDef = { type: newFieldType };
@@ -175,17 +214,6 @@ export default function SchemaEditorPage() {
       const section = { ...prev.sections[sectionName] };
       delete section[fieldName];
       return { ...prev, sections: { ...prev.sections, [sectionName]: section } };
-    });
-  }
-
-  function reorderField(sectionName: string, fromIdx: number, toIdx: number) {
-    setDefinition(prev => {
-      const entries = Object.entries(prev.sections[sectionName]);
-      const [moved] = entries.splice(fromIdx, 1);
-      entries.splice(toIdx, 0, moved);
-      const reordered: Record<string, FieldDef> = {};
-      for (const [k, v] of entries) reordered[k] = v;
-      return { ...prev, sections: { ...prev.sections, [sectionName]: reordered } };
     });
   }
 
@@ -328,28 +356,59 @@ export default function SchemaEditorPage() {
 
       {/* Sections */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {Object.entries(definition.sections).map(([sectionName, fields]) => (
-          <SectionEditor
+        {Object.entries(definition.sections).map(([sectionName, fields], sIdx) => (
+          <div
             key={sectionName}
-            name={sectionName}
-            fields={fields as Record<string, FieldDef>}
-            isAddingField={newFieldSection === sectionName}
-            newFieldName={newFieldName}
-            newFieldType={newFieldType}
-            allGroups={allGroups}
-            onNewFieldNameChange={setNewFieldName}
-            onNewFieldTypeChange={setNewFieldType}
-            onStartAddField={() => setNewFieldSection(sectionName)}
-            onCancelAddField={() => setNewFieldSection(null)}
-            onAddField={() => addField(sectionName)}
-            onRenameSection={(n) => renameSection(sectionName, n)}
-            onRemoveSection={() => removeSection(sectionName)}
-            onRenameField={(old, n) => renameField(sectionName, old, n)}
-            onUpdateField={(f, k, v) => updateField(sectionName, f, k, v)}
-            onRemoveField={(f) => removeField(sectionName, f)}
-            onChangeFieldType={(f, newType) => changeFieldType(sectionName, f, newType)}
-            onReorderField={(from, to) => reorderField(sectionName, from, to)}
-          />
+            draggable
+            onDragStart={e => { e.dataTransfer.setData('text/section', String(sIdx)); setDragSectionIdx(sIdx); }}
+            onDragOver={e => {
+              if (dragSectionIdx !== null) { e.preventDefault(); setDragOverSectionIdx(sIdx); }
+              else if (dragField) { e.preventDefault(); }
+            }}
+            onDragLeave={() => setDragOverSectionIdx(null)}
+            onDrop={() => {
+              if (dragSectionIdx !== null && dragSectionIdx !== sIdx) reorderSection(dragSectionIdx, sIdx);
+              else if (dragField && dragField.section !== sectionName) {
+                const fieldCount = Object.keys(fields).length;
+                moveFieldToIndex(dragField.section, dragField.name, sectionName, fieldCount);
+              }
+              setDragSectionIdx(null); setDragOverSectionIdx(null);
+              setDragField(null); setDragOverField(null);
+            }}
+            onDragEnd={() => { setDragSectionIdx(null); setDragOverSectionIdx(null); setDragField(null); setDragOverField(null); }}
+            className={`transition-all ${dragOverSectionIdx === sIdx ? 'ring-2 ring-stone-400 dark:ring-stone-500 rounded-xl' : ''} ${dragSectionIdx === sIdx ? 'opacity-40' : ''}`}
+          >
+            <SectionEditor
+              name={sectionName}
+              fields={fields as Record<string, FieldDef>}
+              isAddingField={newFieldSection === sectionName}
+              newFieldName={newFieldName}
+              newFieldType={newFieldType}
+              allGroups={allGroups}
+              onNewFieldNameChange={setNewFieldName}
+              onNewFieldTypeChange={setNewFieldType}
+              onStartAddField={() => setNewFieldSection(sectionName)}
+              onCancelAddField={() => setNewFieldSection(null)}
+              onAddField={() => addField(sectionName)}
+              onRenameSection={(n) => renameSection(sectionName, n)}
+              onRemoveSection={() => removeSection(sectionName)}
+              onRenameField={(old, n) => renameField(sectionName, old, n)}
+              onUpdateField={(f, k, v) => updateField(sectionName, f, k, v)}
+              onRemoveField={(f) => removeField(sectionName, f)}
+              onChangeFieldType={(f, newType) => changeFieldType(sectionName, f, newType)}
+              dragField={dragField}
+              dragOverField={dragOverField}
+              onFieldDragStart={(fieldName, idx) => { setDragField({ section: sectionName, name: fieldName, index: idx }); }}
+              onFieldDragOver={(idx) => { setDragOverField({ section: sectionName, index: idx }); }}
+              onFieldDrop={(idx) => {
+                if (dragField) {
+                  moveFieldToIndex(dragField.section, dragField.name, sectionName, idx);
+                }
+                setDragField(null); setDragOverField(null);
+              }}
+              onFieldDragEnd={() => { setDragField(null); setDragOverField(null); }}
+            />
+          </div>
         ))}
       </div>
 
@@ -380,7 +439,7 @@ export default function SchemaEditorPage() {
 
 /* ---- Section Editor ---- */
 
-function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType, allGroups, onNewFieldNameChange, onNewFieldTypeChange, onStartAddField, onCancelAddField, onAddField, onRenameSection, onRemoveSection, onRenameField, onUpdateField, onRemoveField, onChangeFieldType, onReorderField }: {
+function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType, allGroups, onNewFieldNameChange, onNewFieldTypeChange, onStartAddField, onCancelAddField, onAddField, onRenameSection, onRemoveSection, onRenameField, onUpdateField, onRemoveField, onChangeFieldType, dragField, dragOverField, onFieldDragStart, onFieldDragOver, onFieldDrop, onFieldDragEnd }: {
   name: string;
   fields: Record<string, FieldDef>;
   isAddingField: boolean;
@@ -398,12 +457,15 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
   onUpdateField: (field: string, key: string, value: unknown) => void;
   onRemoveField: (field: string) => void;
   onChangeFieldType: (field: string, newType: string) => void;
-  onReorderField: (fromIdx: number, toIdx: number) => void;
+  dragField: { section: string; name: string; index: number } | null;
+  dragOverField: { section: string; index: number } | null;
+  onFieldDragStart: (fieldName: string, index: number) => void;
+  onFieldDragOver: (index: number) => void;
+  onFieldDrop: (index: number) => void;
+  onFieldDragEnd: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(name);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   function commitRename() {
     if (editName.trim() && editName !== name) onRenameSection(editName.trim());
@@ -413,7 +475,9 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
   return (
     <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-4">
       <div className="flex items-center justify-between mb-2">
-        {editing ? (
+        <div className="flex items-center gap-2">
+          <span className="cursor-grab active:cursor-grabbing text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400 select-none" title="Drag to reorder section">⠿</span>
+          {editing ? (
           <input
             value={editName}
             onChange={e => setEditName(e.target.value)}
@@ -431,6 +495,7 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
             {name}
           </h2>
         )}
+        </div>
         <button onClick={onRemoveSection} className="text-stone-300 dark:text-stone-600 hover:text-red-400 text-sm">
           Remove Section
         </button>
@@ -441,16 +506,15 @@ function SectionEditor({ name, fields, isAddingField, newFieldName, newFieldType
           <div
             key={fieldName}
             draggable
-            onDragStart={() => setDragIdx(idx)}
-            onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }}
-            onDragLeave={() => setDragOverIdx(null)}
-            onDrop={() => {
-              if (dragIdx !== null && dragIdx !== idx) onReorderField(dragIdx, idx);
-              setDragIdx(null);
-              setDragOverIdx(null);
+            onDragStart={e => { e.stopPropagation(); onFieldDragStart(fieldName, idx); }}
+            onDragOver={e => { if (dragField) { e.preventDefault(); e.stopPropagation(); onFieldDragOver(idx); } }}
+            onDragLeave={e => e.stopPropagation()}
+            onDrop={e => {
+              e.stopPropagation();
+              if (dragField) onFieldDrop(idx);
             }}
-            onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-            className={`transition-all ${dragOverIdx === idx ? 'border-t-2 border-stone-400 dark:border-stone-500' : ''} ${dragIdx === idx ? 'opacity-40' : ''}`}
+            onDragEnd={onFieldDragEnd}
+            className={`transition-all ${dragOverField?.section === name && dragOverField?.index === idx ? 'border-t-2 border-stone-400 dark:border-stone-500' : ''} ${dragField?.section === name && dragField?.index === idx ? 'opacity-40' : ''}`}
           >
             <FieldDefEditor
               name={fieldName}
@@ -510,7 +574,7 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
   const [expanded, setExpanded] = useState(false);
 
   // Does this type have configurable options?
-  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link', 'hierarchy'].includes(def.type);
+  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link', 'hierarchy'].includes(def.type) || def.type === 'string';
   const supportsCardinality = !['computed'].includes(def.type);
 
   // Auto-expand options panel when switching to a configurable type
@@ -698,6 +762,18 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
               value={def.hierarchy_options || {}}
               onChange={v => onUpdate('hierarchy_options', v)}
             />
+          )}
+
+          {def.type === 'string' && (
+            <label className="flex items-center gap-2 text-stone-600 dark:text-stone-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={!!def.filterable}
+                onChange={e => onUpdate('filterable', e.target.checked || undefined)}
+                className="accent-stone-600 dark:accent-stone-400"
+              />
+              Filterable in search
+            </label>
           )}
         </div>
       )}

@@ -107,7 +107,7 @@ export default function GroupsPage() {
               {group.thumbnail && (
                 <div className="h-32 bg-stone-100 dark:bg-stone-800">
                   <img
-                    src={api.groups.thumbnailUrl(group.id)}
+                    src={`${api.groups.thumbnailUrl(group.id)}?v=${group.updated_at}`}
                     alt=""
                     className="w-full h-full object-cover"
                   />

@@ -169,7 +169,7 @@ async def search(
     return [_item_to_out(item) for item in items]
 
 
-FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit", "hierarchy"}
+FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit", "hierarchy", "string"}
 
 
 @router.get("/facets")
@@ -340,6 +340,25 @@ async def get_facets(
                         "unit": field_def.get("default_unit", ""),
                     }
 
+                elif ftype == "string":
+                    if not field_def.get("filterable"):
+                        continue
+                    count_result = await db.execute(text(
+                        "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
+                        f"FROM items WHERE group_id = :gid {base_clause}"
+                        "AND json_extract(data, :path) IS NOT NULL "
+                        "AND json_extract(data, :path) != '' "
+                        "GROUP BY val ORDER BY cnt DESC, val ASC"
+                    ), {"path": f"$.{field_name}", "gid": group_id})
+                    options = [
+                        {"value": str(r[0]), "count": r[1]}
+                        for r in count_result.fetchall()
+                    ]
+                    if len(options) > 0 and len(options) <= 50:
+                        facets[field_name] = {
+                            "type": "string", "field": field_name, "options": options,
+                        }
+
     # Collect tags with counts
     tag_q = (
         select(ItemTag.tag, func.count(ItemTag.tag).label("cnt"))
@@ -348,7 +367,7 @@ async def get_facets(
     )
     if base_ids is not None:
         tag_q = tag_q.where(Item.id.in_(base_ids))
-    tag_q = tag_q.group_by(ItemTag.tag).order_by(func.count(ItemTag.tag).desc())
+    tag_q = tag_q.group_by(ItemTag.tag).order_by(func.count(ItemTag.tag).desc(), ItemTag.tag.asc())
     tag_result = await db.execute(tag_q)
     tags = [{"tag": row[0], "count": row[1]} for row in tag_result.fetchall()]
 

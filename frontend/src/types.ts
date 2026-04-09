@@ -25,6 +25,7 @@ export interface FieldDef {
   link_schema_id?: number;
   placeholder?: string;
   hierarchy_options?: Record<string, string[]>;
+  filterable?: boolean;
 }
 
 export interface SchemaSections {

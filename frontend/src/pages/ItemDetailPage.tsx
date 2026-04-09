@@ -7,7 +7,7 @@ import type { Item, ItemSchema, FieldDef } from '../types';
 export default function ItemDetailPage() {
   const { groupId, itemId } = useParams<{ groupId: string; itemId: string }>();
   const gid = Number(groupId);
-  const iid = Number(itemId);
+  const itemUuid = itemId!;
   const navigate = useNavigate();
 
   const [item, setItem] = useState<Item | null>(null);
@@ -18,7 +18,7 @@ export default function ItemDetailPage() {
   const [formName, setFormName] = useState('');
   const [formTags, setFormTags] = useState('');
   const [saving, setSaving] = useState(false);
-  const [lightboxImage, setLightboxImage] = useState<{ itemId: number; imageId: number } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ itemUuid: string; imageId: number } | null>(null);
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
   const [imageVersion, setImageVersion] = useState(0);
   const [notFound, setNotFound] = useState(false);
@@ -26,7 +26,7 @@ export default function ItemDetailPage() {
 
   useEffect(() => {
     loadItem();
-  }, [gid, iid]);
+  }, [gid, itemUuid]);
 
   useEffect(() => {
     api.groups.get(gid).then(group => setGroupName(group.name)).catch(() => undefined);
@@ -50,7 +50,7 @@ export default function ItemDetailPage() {
 
   async function loadItem() {
     try {
-      const it = await api.items.get(gid, iid);
+      const it = await api.items.get(gid, itemUuid);
       setItem(it);
       setFormData(it.data);
       setFormName(it.name || '');
@@ -65,7 +65,7 @@ export default function ItemDetailPage() {
   // Reload only images without resetting form state
   async function reloadImages() {
     try {
-      const it = await api.items.get(gid, iid);
+      const it = await api.items.get(gid, itemUuid);
       setItem(prev => prev ? { ...prev, images: it.images } : it);
       setImageVersion(prev => prev + 1);
     } catch { /* ignore */ }
@@ -75,7 +75,7 @@ export default function ItemDetailPage() {
     setSaving(true);
     try {
       const tags = formTags.split(',').map(t => t.trim()).filter(Boolean);
-      await api.items.update(gid, iid, { name: formName.trim(), data: formData, tags });
+      await api.items.update(gid, itemUuid, { name: formName.trim(), data: formData, tags });
       pendingNamedUploadIdsRef.current.clear();
       await loadItem();
       setEditing(false);
@@ -88,7 +88,7 @@ export default function ItemDetailPage() {
     const pendingIds = Array.from(pendingNamedUploadIdsRef.current);
     pendingNamedUploadIdsRef.current.clear();
     if (pendingIds.length === 0) return;
-    await Promise.all(pendingIds.map(imageId => api.images.delete(iid, imageId).catch(() => undefined)));
+    await Promise.all(pendingIds.map(imageId => api.images.delete(itemUuid, imageId).catch(() => undefined)));
     await reloadImages();
   }
 
@@ -103,30 +103,30 @@ export default function ItemDetailPage() {
 
   async function handleDelete() {
     if (!confirm('Delete this item?')) return;
-    await api.items.delete(gid, iid);
+    await api.items.delete(gid, itemUuid);
     navigate(`/groups/${gid}`);
   }
 
   async function handleImageUpload(files: File[]) {
     for (const file of files) {
-      await api.images.upload(iid, file);
+      await api.images.upload(itemUuid, file);
     }
     await reloadImages();
   }
 
   async function handleImageUrlUpload(url: string) {
-    await api.images.uploadFromUrl(iid, url);
+    await api.images.uploadFromUrl(itemUuid, url);
     await reloadImages();
   }
 
   async function handleImageDelete(imageId: number) {
-    await api.images.delete(iid, imageId);
+    await api.images.delete(itemUuid, imageId);
     pendingNamedUploadIdsRef.current.delete(imageId);
     await reloadImages();
   }
 
   async function handleSetPrimary(imageId: number) {
-    await api.images.setPrimary(iid, imageId);
+    await api.images.setPrimary(itemUuid, imageId);
     await reloadImages();
   }
 
@@ -134,7 +134,7 @@ export default function ItemDetailPage() {
     if (!previousImageId || previousImageId === nextImageId) return false;
     if (!pendingNamedUploadIdsRef.current.has(previousImageId)) return false;
     pendingNamedUploadIdsRef.current.delete(previousImageId);
-    await api.images.delete(iid, previousImageId).catch(() => undefined);
+    await api.images.delete(itemUuid, previousImageId).catch(() => undefined);
     return true;
   }
 
@@ -183,7 +183,7 @@ export default function ItemDetailPage() {
   const itemImageOptions: ImageSourceOption[] = item.images.map((image, index) => ({
     id: String(image.id),
     label: image.original_filename || `Image ${index + 1}`,
-    previewUrl: `${api.images.thumbUrl(iid, image.id)}?v=${imageVersion}`,
+    previewUrl: `${api.images.thumbUrl(itemUuid, image.id)}?v=${imageVersion}`,
   }));
 
   return (
@@ -252,10 +252,10 @@ export default function ItemDetailPage() {
             <div className="grid grid-cols-2 gap-2">
               {item.images.map((img, idx) => (
                 <div key={img.id} className={`relative aspect-square rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group cursor-pointer ${idx === 0 ? 'ring-2 ring-stone-400 dark:ring-stone-500' : ''}`}
-                  onClick={() => setLightboxImage({ itemId: iid, imageId: img.id })}
+                  onClick={() => setLightboxImage({ itemUuid, imageId: img.id })}
                 >
                   <img
-                    src={`${api.images.thumbUrl(iid, img.id)}?v=${imageVersion}`}
+                    src={`${api.images.thumbUrl(itemUuid, img.id)}?v=${imageVersion}`}
                     alt=""
                     className="w-full h-full object-cover"
                   />
@@ -342,7 +342,7 @@ export default function ItemDetailPage() {
                       <div key={fieldName} className="sm:col-span-2">
                         <label className="block text-xs text-stone-400 dark:text-stone-500 mb-1">{fieldName}</label>
                         <NamedImageField
-                          itemId={iid}
+                          itemUuid={itemUuid}
                           imageId={imageId || null}
                           editing={editing}
                           itemImages={itemImageOptions}
@@ -354,7 +354,7 @@ export default function ItemDetailPage() {
                             await handleNamedImageAssign(fieldName, imgId, true);
                           }}
                           onUploadedFromUrl={async (url) => {
-                            const uploaded = await api.images.uploadFromUrl(iid, url);
+                            const uploaded = await api.images.uploadFromUrl(itemUuid, url);
                             await handleNamedImageAssign(fieldName, uploaded.id, true);
                           }}
                           onRemoved={async () => {
@@ -403,12 +403,12 @@ export default function ItemDetailPage() {
                           <div className="space-y-1">
                             {values.length === 0 && <span className="text-sm text-stone-400 dark:text-stone-500">&mdash;</span>}
                             {values.map((v, i) => (
-                              fd.type === 'link' && v && typeof v === 'object' && 'id' in (v as Record<string, unknown>) ? (
-                                <div key={i}><LinkedItemValue value={v as { id: number; name: string }} groupId={fd.link_group_id || gid} /></div>
+                              fd.type === 'link' && v && typeof v === 'object' && ('uuid' in (v as Record<string, unknown>) || 'id' in (v as Record<string, unknown>)) ? (
+                                <div key={i}><LinkedItemValue value={v as { uuid?: string; id?: number; name: string }} groupId={fd.link_group_id || gid} /></div>
                               ) : fd.type === 'url' && v ? (
                                 <div key={i}><a href={String(v)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300 break-all">{String(v)}</a></div>
                               ) : (
-                                <div key={i} className="text-sm text-stone-800 dark:text-stone-200">{formatDisplay(v, fd.type)}</div>
+                                <div key={i} className="text-sm text-stone-800 dark:text-stone-200 break-words">{formatDisplay(v, fd.type)}</div>
                               )
                             ))}
                           </div>
@@ -426,9 +426,9 @@ export default function ItemDetailPage() {
                           value={formData[fieldName]}
                           onChange={v => setFormData(prev => ({ ...prev, [fieldName]: v }))}
                         />
-                      ) : fd.type === 'link' && val && typeof val === 'object' && 'id' in (val as Record<string, unknown>) ? (
+                      ) : fd.type === 'link' && val && typeof val === 'object' && ('uuid' in (val as Record<string, unknown>) || 'id' in (val as Record<string, unknown>)) ? (
                         <LinkedItemValue
-                          value={val as { id: number; name: string }}
+                          value={val as { uuid?: string; id?: number; name: string }}
                           groupId={(fd as FieldDef).link_group_id || gid}
                         />
                       ) : fd.type === 'url' && val ? (
@@ -441,7 +441,7 @@ export default function ItemDetailPage() {
                           {String(val)}
                         </a>
                       ) : (
-                        <div className={`text-sm text-stone-800 dark:text-stone-200 ${fd.type === 'textarea' ? 'whitespace-pre-wrap' : ''}`}>
+                        <div className={`text-sm text-stone-800 dark:text-stone-200 break-words ${fd.type === 'textarea' ? 'whitespace-pre-wrap' : ''}`}>
                           {formatDisplay(val, fd.type)}
                         </div>
                       )}
@@ -471,7 +471,7 @@ export default function ItemDetailPage() {
             &times;
           </button>
           <img
-            src={`${api.images.url(lightboxImage.itemId, lightboxImage.imageId)}?v=${imageVersion}`}
+            src={`${api.images.url(lightboxImage.itemUuid, lightboxImage.imageId)}?v=${imageVersion}`}
             alt=""
             className="max-w-full max-h-full object-contain rounded-lg"
             onClick={e => e.stopPropagation()}
@@ -483,44 +483,52 @@ export default function ItemDetailPage() {
 }
 
 function LinkedItemValue({ value, groupId }: {
-  value: { id: number; name: string };
+  value: { uuid?: string; id?: number; name: string };
   groupId: number;
 }) {
+  const [resolved, setResolved] = useState<{ uuid: string; groupId: number } | null>(null);
   const [exists, setExists] = useState<boolean | null>(null);
-  const [thumb, setThumb] = useState<{ itemId: number; imageId: number } | null>(null);
+  const [thumb, setThumb] = useState<{ itemUuid: string; imageId: number } | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    api.items.get(groupId, value.id)
-      .then(item => {
-        if (!mounted) return;
-        setExists(true);
-        if (item.images?.length) {
-          setThumb({ itemId: item.id, imageId: item.images[0].id });
-        }
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setExists(false);
-      });
 
-    return () => {
-      mounted = false;
-    };
-  }, [groupId, value.id]);
+    async function resolve() {
+      try {
+        let item: Item | null = null;
+        if (value.uuid) {
+          item = await api.items.get(groupId, value.uuid);
+        }
+        if (!mounted || !item) { if (mounted) setExists(false); return; }
+        setExists(true);
+        setResolved({ uuid: item.uuid, groupId: item.group_id });
+        if (item.images?.length) {
+          setThumb({ itemUuid: item.uuid, imageId: item.images[0].id });
+        }
+      } catch {
+        if (mounted) setExists(false);
+      }
+    }
+
+    resolve();
+    return () => { mounted = false; };
+  }, [groupId, value.uuid]);
 
   if (exists === false) {
-    return <span className="text-sm text-red-500">{value.name || `Missing item #${value.id}`}</span>;
+    return <span className="text-sm text-red-500">{value.name || `Missing item`}</span>;
   }
+
+  const targetGroup = resolved?.groupId ?? groupId;
+  const targetUuid = resolved?.uuid ?? value.uuid;
 
   return (
     <Link
-      to={`/groups/${groupId}/items/${value.id}`}
+      to={`/groups/${targetGroup}/items/${targetUuid}`}
       className="inline-flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300 underline hover:text-stone-900 dark:hover:text-white"
     >
       {thumb && (
         <img
-          src={api.images.thumbUrl(thumb.itemId, thumb.imageId)}
+          src={api.images.thumbUrl(thumb.itemUuid, thumb.imageId)}
           alt=""
           className="h-10 w-10 rounded object-cover"
         />
@@ -530,8 +538,8 @@ function LinkedItemValue({ value, groupId }: {
   );
 }
 
-function NamedImageField({ itemId, imageId, editing, itemImages, imageVersion, onSelected, onUploaded, onUploadedFromUrl, onRemoved }: {
-  itemId: number;
+function NamedImageField({ itemUuid, imageId, editing, itemImages, imageVersion, onSelected, onUploaded, onUploadedFromUrl, onRemoved }: {
+  itemUuid: string;
   imageId: number | null;
   editing: boolean;
   itemImages: ImageSourceOption[];
@@ -544,7 +552,7 @@ function NamedImageField({ itemId, imageId, editing, itemImages, imageVersion, o
   const [showPicker, setShowPicker] = useState(false);
 
   async function handleUpload(file: File) {
-    const img = await api.images.upload(itemId, file);
+    const img = await api.images.upload(itemUuid, file);
     onUploaded(img.id);
   }
 
@@ -552,7 +560,7 @@ function NamedImageField({ itemId, imageId, editing, itemImages, imageVersion, o
     return (
       <>
         <div className="relative w-40 h-40 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 group">
-          <img src={`${api.images.url(itemId, imageId)}?v=${imageVersion}`} className="w-full h-full object-cover" alt="" />
+          <img src={`${api.images.url(itemUuid, imageId)}?v=${imageVersion}`} className="w-full h-full object-cover" alt="" />
           {editing && (
             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="absolute top-1 right-1 flex gap-1">
@@ -702,7 +710,7 @@ function LinkFieldEdit({ def, value, onChange }: {
   const [items, setItems] = useState<Item[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
-  const linked = value as { id: number; name: string } | null;
+  const linked = value as { uuid: string; name: string } | { id: number; name: string } | null;
 
   useEffect(() => {
     if (!def.link_group_id) return;
@@ -740,7 +748,7 @@ function LinkFieldEdit({ def, value, onChange }: {
             <button
               key={it.id}
               type="button"
-              onClick={() => { onChange({ id: it.id, name: it.name }); setSearch(''); setOpen(false); }}
+              onClick={() => { onChange({ uuid: it.uuid, name: it.name }); setSearch(''); setOpen(false); }}
               className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200"
             >
               {it.name}
@@ -801,7 +809,7 @@ function getDefaultForType(fd: FieldDef): unknown {
 
 function formatDisplay(val: unknown, fieldType?: string): string {
   if (fieldType === 'boolean') return val === true ? 'Yes' : 'No';
-  if (val == null) return '—';
+  if (val == null || val === '') return '—';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
   if (Array.isArray(val)) return val.join(', ') || '—';
   if (typeof val === 'object' && 'name' in (val as Record<string, unknown>) && 'id' in (val as Record<string, unknown>)) {

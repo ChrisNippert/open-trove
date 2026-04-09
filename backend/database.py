@@ -59,3 +59,59 @@ async def init_db():
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_items_uuid ON items(uuid)"
                 )
             )
+
+        # Migrate: convert link fields in item data from {id, name} to {uuid, name}
+        import json as _json
+        all_items = await conn.execute(
+            __import__('sqlalchemy').text("SELECT id, data FROM items WHERE data IS NOT NULL")
+        )
+        all_items_rows = all_items.fetchall()
+        # Build id->uuid map
+        uuid_map_rows = await conn.execute(
+            __import__('sqlalchemy').text("SELECT id, uuid FROM items WHERE uuid IS NOT NULL")
+        )
+        id_to_uuid = {row[0]: row[1] for row in uuid_map_rows.fetchall()}
+        # Get all link field names from schemas
+        schema_rows = await conn.execute(
+            __import__('sqlalchemy').text("SELECT definition FROM item_schemas")
+        )
+        link_fields: set[str] = set()
+        for (defn_str,) in schema_rows.fetchall():
+            try:
+                defn = _json.loads(defn_str) if defn_str else {}
+                for _sec, fields in defn.get("sections", {}).items():
+                    for fname, fdef in fields.items():
+                        if fdef.get("type") == "link":
+                            link_fields.add(fname)
+            except (ValueError, TypeError):
+                pass
+        if link_fields:
+            for item_id, data_str in all_items_rows:
+                try:
+                    data = _json.loads(data_str) if data_str else {}
+                except (ValueError, TypeError):
+                    continue
+                changed = False
+                for fname in link_fields:
+                    val = data.get(fname)
+                    if isinstance(val, dict) and "id" in val and "uuid" not in val:
+                        target_uuid = id_to_uuid.get(val["id"])
+                        if target_uuid:
+                            val["uuid"] = target_uuid
+                            del val["id"]
+                            changed = True
+                    elif isinstance(val, list):
+                        for entry in val:
+                            if isinstance(entry, dict) and "id" in entry and "uuid" not in entry:
+                                target_uuid = id_to_uuid.get(entry["id"])
+                                if target_uuid:
+                                    entry["uuid"] = target_uuid
+                                    del entry["id"]
+                                    changed = True
+                if changed:
+                    await conn.execute(
+                        __import__('sqlalchemy').text(
+                            "UPDATE items SET data = :data WHERE id = :id"
+                        ),
+                        {"data": _json.dumps(data), "id": item_id}
+                    )

@@ -8,23 +8,24 @@ DON'T EDIT ANYTHING BELOW THIS LINE IN THIS FILE! BELOW IS ONLY TO BE EDITED MAN
 
 # Bugs
 <!-- * Setup instructions:  used ./.venv/Script/Activate.ps1 for Windows, no .venv/bin folder -->
+<!-- * currency doesn't pad zeroes (ie "7.5" USD), but then it would depend on what the currency is -->
+
+
 
 # QoL
+* Be able to import csv as long as columns exist in the schema.
+
 
 ## Images
 
 
 ## Linked Data:
-* When an item is deleted, it's ID spot presumably can be taken, since there was an item that was deleted, and a new item took it's place, and now the links point to the wrong item since the ID is the same.
-    * Fixed by giving each item a unique uuid
-    * Depending on the sql database schema, this might require a change from some int to a string since items will have alphanumeric codes
 
 ## Export/Import:
 
 ## Search:
 * new color field type that could use a color picker as input, and then display close-ish colors on search?
     * Would require color classification on the images or edge detection to get the subject, average the color pixels, and then get nearest color
-
 
 
 ## collection view:
@@ -111,3 +112,19 @@ DON'T EDIT ANYTHING BELOW THIS LINE IN THIS FILE! BELOW IS ONLY TO BE EDITED MAN
 * for count, the plus and minus should be more clickable, and the number maybe typeable? Also if no other config options, please remove the config dropdown as it shows nothing
 
 * Think there is a better way to display the schema? it seems vertically verbose if you know what I mean. WHat are your thoughts?
+
+* You can't add a url image when first creating an item
+* changing the collection icon/image doesn't update on the UI until you refresh the page
+* if string is very long without breaks it doesn't auto wrap and instead goes off of the page
+* on the search field, tags are ordered by number of items (good), and then reverse alphabetical order (should be normal alphabetical)
+
+* if a string field on an item is populated but then erased by the user, a dash ("-") should be rendered on the client side for that field
+* Import and export options should be a dropdown menu
+
+* For filters, can we make all string fields filterable by all different strings they have
+* deleting a collection does not remove the associated images
+* moving fields between sections would be nice
+
+* When an item is deleted, it's ID spot presumably can be taken, since there was an item that was deleted, and a new item took it's place, and now the links point to the wrong item since the ID is the same.
+    * Fixed by giving each item a unique uuid
+    * Depending on the sql database schema, this might require a change from some int to a string since items will have alphanumeric codes

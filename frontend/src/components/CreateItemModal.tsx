@@ -30,6 +30,7 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [imageFiles, setImageFiles] = useState<PendingImageFile[]>([]);
+  const [pendingUrls, setPendingUrls] = useState<string[]>([]);
   const [namedImageSelections, setNamedImageSelections] = useState<Record<string, NamedImageSelection>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [showImagesModal, setShowImagesModal] = useState(false);
@@ -113,8 +114,12 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
 
       const uploadedQueuedImages = new Map<string, number>();
       for (const image of imageFiles) {
-        const uploaded = await api.images.upload(item.id, image.file);
+        const uploaded = await api.images.upload(item.uuid, image.file);
         uploadedQueuedImages.set(image.id, uploaded.id);
+      }
+
+      for (const url of pendingUrls) {
+        await api.images.uploadFromUrl(item.uuid, url);
       }
 
       const namedImageData: Record<string, number> = {};
@@ -126,13 +131,13 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
         }
 
         if (selection.file) {
-          const img = await api.images.upload(item.id, selection.file);
+          const img = await api.images.upload(item.uuid, selection.file);
           namedImageData[fieldName] = img.id;
         }
       }
 
       if (Object.keys(namedImageData).length > 0) {
-        await api.items.update(groupId, item.id, {
+        await api.items.update(groupId, item.uuid, {
           data: { ...formData, ...namedImageData },
         });
       }
@@ -295,6 +300,18 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
                   </button>
                 </div>
               ))}
+              {pendingUrls.map((url, i) => (
+                <div key={`url-${i}`} className="relative w-20 h-20 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800">
+                  <img src={url} className="w-full h-full object-cover" alt="" />
+                  <button
+                    type="button"
+                    onClick={() => setPendingUrls(prev => prev.filter((_, idx) => idx !== i))}
+                    className="absolute top-0.5 right-0.5 bg-black/50 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
               <button
                 type="button"
                 onClick={() => setShowImagesModal(true)}
@@ -315,6 +332,7 @@ export default function CreateItemModal({ groupId, schemas, onClose, onCreated }
             onSelectFiles={async files => {
               addPendingImages(files);
             }}
+            onSelectUrl={url => setPendingUrls(prev => [...prev, url])}
           />
 
           {/* Actions */}
@@ -616,7 +634,7 @@ function LinkFieldInput({ name, def, value, onChange }: {
   const [items, setItems] = useState<Item[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
-  const linked = value as { id: number; name: string } | null;
+  const linked = value as { uuid: string; name: string } | null;
 
   useEffect(() => {
     if (!def.link_group_id) return;
@@ -653,7 +671,7 @@ function LinkFieldInput({ name, def, value, onChange }: {
                 <button
                   key={it.id}
                   type="button"
-                  onClick={() => { onChange({ id: it.id, name: it.name }); setSearch(''); setOpen(false); }}
+                  onClick={() => { onChange({ uuid: it.uuid, name: it.name }); setSearch(''); setOpen(false); }}
                   className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200"
                 >
                   {it.name}

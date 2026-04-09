@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from PIL import Image as PILImage
 
 from ..database import get_db
-from ..models import Group, ItemSchema, Item
+from ..models import Group, ItemSchema, Item, ItemImage
 from ..schemas import GroupCreate, GroupUpdate, GroupOut
 from ..config import IMAGES_DIR, THUMBNAIL_SIZE
 
@@ -111,6 +111,17 @@ async def delete_group(group_id: int, db: AsyncSession = Depends(get_db)):
         thumb_path = IMAGES_DIR / group.thumbnail
         if thumb_path.exists():
             thumb_path.unlink(missing_ok=True)
+    # Clean up all item image files
+    img_q = select(ItemImage).join(Item).where(Item.group_id == group_id)
+    img_result = await db.execute(img_q)
+    for img in img_result.scalars():
+        file_path = IMAGES_DIR / img.filename
+        if file_path.exists():
+            file_path.unlink(missing_ok=True)
+        if img.thumbnail_filename:
+            t_path = IMAGES_DIR / img.thumbnail_filename
+            if t_path.exists():
+                t_path.unlink(missing_ok=True)
     await db.delete(group)
     await db.commit()
 

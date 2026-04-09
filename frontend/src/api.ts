@@ -61,29 +61,29 @@ export const api = {
       const qs = params.toString();
       return request<Item[]>(`/groups/${groupId}/items${qs ? `?${qs}` : ''}`);
     },
-    get: (groupId: number, itemId: number) =>
-      request<Item>(`/groups/${groupId}/items/${itemId}`),
+    get: (groupId: number, itemUuid: string) =>
+      request<Item>(`/groups/${groupId}/items/${itemUuid}`),
     create: (groupId: number, data: { name?: string; schema_id: number; data: object; tags?: string[] }) =>
       request<Item>(`/groups/${groupId}/items`, { method: 'POST', body: JSON.stringify(data) }),
-    update: (groupId: number, itemId: number, data: { name?: string; data?: object; tags?: string[] }) =>
-      request<Item>(`/groups/${groupId}/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
-    delete: (groupId: number, itemId: number) =>
-      request<void>(`/groups/${groupId}/items/${itemId}`, { method: 'DELETE' }),
+    update: (groupId: number, itemUuid: string, data: { name?: string; data?: object; tags?: string[] }) =>
+      request<Item>(`/groups/${groupId}/items/${itemUuid}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (groupId: number, itemUuid: string) =>
+      request<void>(`/groups/${groupId}/items/${itemUuid}`, { method: 'DELETE' }),
   },
 
   images: {
-    upload: async (itemId: number, file: File) => {
+    upload: async (itemUuid: string, file: File) => {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${BASE}/items/${itemId}/images`, {
+      const res = await fetch(`${BASE}/items/${itemUuid}/images`, {
         method: 'POST',
         body: form,
       });
       if (!res.ok) throw new Error('Upload failed');
       return res.json();
     },
-    uploadFromUrl: async (itemId: number, url: string) => {
-      const res = await fetch(`${BASE}/items/${itemId}/images/from-url`, {
+    uploadFromUrl: async (itemUuid: string, url: string) => {
+      const res = await fetch(`${BASE}/items/${itemUuid}/images/from-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
@@ -94,13 +94,13 @@ export const api = {
       }
       return res.json();
     },
-    list: (itemId: number) => request<Item['images']>(`/items/${itemId}/images`),
-    delete: (itemId: number, imageId: number) =>
-      request<void>(`/items/${itemId}/images/${imageId}`, { method: 'DELETE' }),
-    setPrimary: (itemId: number, imageId: number) =>
-      request<unknown>(`/items/${itemId}/images/${imageId}/set-primary`, { method: 'POST' }),
-    url: (itemId: number, imageId: number) => `${BASE}/items/${itemId}/images/${imageId}/file`,
-    thumbUrl: (itemId: number, imageId: number) => `${BASE}/items/${itemId}/images/${imageId}/thumbnail`,
+    list: (itemUuid: string) => request<Item['images']>(`/items/${itemUuid}/images`),
+    delete: (itemUuid: string, imageId: number) =>
+      request<void>(`/items/${itemUuid}/images/${imageId}`, { method: 'DELETE' }),
+    setPrimary: (itemUuid: string, imageId: number) =>
+      request<unknown>(`/items/${itemUuid}/images/${imageId}/set-primary`, { method: 'POST' }),
+    url: (itemUuid: string, imageId: number) => `${BASE}/items/${itemUuid}/images/${imageId}/file`,
+    thumbUrl: (itemUuid: string, imageId: number) => `${BASE}/items/${itemUuid}/images/${imageId}/thumbnail`,
   },
 
   search: (opts: { q?: string; group_id?: number; field?: string; op?: string; value?: string; tag?: string; filters?: string }) => {

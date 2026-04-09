@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import type { Group, ItemSchema, Item } from '../types';
@@ -131,6 +131,19 @@ export default function GroupDetailPage() {
   const [editGroupDesc, setEditGroupDesc] = useState('');
   const [sortField, setSortField] = useState<string>('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [thumbVersion, setThumbVersion] = useState(0);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (importSchemaId !== -2) return;
+    function handleClick(e: MouseEvent) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setImportSchemaId(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [importSchemaId]);
 
   useEffect(() => {
     loadData();
@@ -205,10 +218,10 @@ export default function GroupDetailPage() {
     }
   }
 
-  async function handleDeleteItem(itemId: number) {
+  async function handleDeleteItem(itemUuid: string) {
     if (!confirm('Delete this item?')) return;
-    await api.items.delete(gid, itemId);
-    setItems(prev => prev.filter(i => i.id !== itemId));
+    await api.items.delete(gid, itemUuid);
+    setItems(prev => prev.filter(i => i.uuid !== itemUuid));
   }
 
   async function handleDuplicateItem(item: Item) {
@@ -356,6 +369,14 @@ export default function GroupDetailPage() {
       if (typeof av === 'number' && typeof bv === 'number') {
         return sortDir === 'asc' ? av - bv : bv - av;
       }
+      // Date comparison
+      if (typeof av === 'string' && typeof bv === 'string') {
+        const da = new Date(av).getTime();
+        const db = new Date(bv).getTime();
+        if (!isNaN(da) && !isNaN(db)) {
+          return sortDir === 'asc' ? da - db : db - da;
+        }
+      }
       // String comparison
       const as = String(av).toLowerCase();
       const bs = String(bv).toLowerCase();
@@ -388,7 +409,7 @@ export default function GroupDetailPage() {
           <div className="relative group/thumb">
             {group.thumbnail ? (
               <img
-                src={api.groups.thumbnailUrl(gid)}
+                src={`${api.groups.thumbnailUrl(gid)}?v=${thumbVersion}`}
                 alt=""
                 className="w-14 h-14 rounded-lg object-cover border border-stone-200 dark:border-stone-700"
               />
@@ -409,6 +430,7 @@ export default function GroupDetailPage() {
                   if (!file) return;
                   const updated = await api.groups.uploadThumbnail(gid, file);
                   setGroup(prev => prev ? { ...prev, thumbnail: updated.thumbnail } : prev);
+                  setThumbVersion(v => v + 1);
                 };
                 input.click();
               }}
@@ -453,57 +475,64 @@ export default function GroupDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <a
-            href={api.export.jsonUrl(gid)}
-            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
-          >
-            Export Data
-          </a>
-          <a
-            href={api.export.jsonUrl(gid, true)}
-            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
-            title="Export with schemas and data"
-          >
-            Export Bundle
-          </a>
-          {schemas.length === 1 ? (
+          <div className="relative" ref={exportMenuRef}>
             <button
-              onClick={handleImportClick}
+              onClick={() => setImportSchemaId(importSchemaId === -2 ? null : -2)}
               className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
             >
-              Import
+              Import / Export ▾
             </button>
-          ) : schemas.length > 1 ? (
-            <div className="relative">
-              <button
-                onClick={() => setImportSchemaId(importSchemaId === -1 ? null : -1)}
-                className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
-              >
-                Import ▾
-              </button>
-              {importSchemaId === -1 && (
-                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg z-10 min-w-[160px]">
-                  <div className="px-3 py-2 text-xs text-stone-400 dark:text-stone-500 border-b border-stone-100 dark:border-stone-700">Import into schema:</div>
-                  {schemas.map(s => (
+            {importSchemaId === -2 && (
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg z-10 min-w-[180px] py-1">
+                <div className="px-3 py-1.5 text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide">Export</div>
+                <a
+                  href={api.export.jsonUrl(gid)}
+                  className="block w-full text-left px-3 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700"
+                  onClick={() => setImportSchemaId(null)}
+                >
+                  Export Data
+                </a>
+                <a
+                  href={api.export.jsonUrl(gid, true)}
+                  className="block w-full text-left px-3 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700"
+                  onClick={() => setImportSchemaId(null)}
+                >
+                  Export Bundle
+                </a>
+                <div className="border-t border-stone-100 dark:border-stone-700 my-1" />
+                <div className="px-3 py-1.5 text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide">Import</div>
+                {schemas.length >= 1 && (
+                  schemas.length === 1 ? (
                     <button
-                      key={s.id}
-                      onClick={() => { setImportSchemaId(null); handleImportWithSchema(s.id); }}
+                      onClick={() => { setImportSchemaId(null); handleImportClick(); }}
                       className="block w-full text-left px-3 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700"
                     >
-                      {s.name}
+                      Import Data
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
-          <button
-            onClick={handleBundleImport}
-            className="px-3 py-1.5 text-sm border border-stone-300 dark:border-stone-600 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800"
-            title="Import a bundle with schemas and items"
-          >
-            Import Bundle
-          </button>
+                  ) : (
+                    <>
+                      <div className="px-3 py-1 text-xs text-stone-400 dark:text-stone-500">Into schema:</div>
+                      {schemas.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => { setImportSchemaId(null); handleImportWithSchema(s.id); }}
+                          className="block w-full text-left px-3 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700 pl-5"
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+                    </>
+                  )
+                )}
+                <button
+                  onClick={() => { setImportSchemaId(null); handleBundleImport(); }}
+                  className="block w-full text-left px-3 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700"
+                >
+                  Import Bundle
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowCreateItem(true)}
             className="px-4 py-2 bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900 rounded-lg text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-300"
@@ -690,7 +719,7 @@ export default function GroupDetailPage() {
               <ItemCard
                 item={item}
                 groupId={gid}
-                onDelete={() => handleDeleteItem(item.id)}
+                onDelete={() => handleDeleteItem(item.uuid)}
               />
               <button
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDuplicateItem(item); }}
@@ -728,11 +757,11 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
   items: Item[];
   groupId: number;
   schemas: ItemSchema[];
-  onDelete: (id: number) => void;
+  onDelete: (uuid: string) => void;
   onDuplicate: (item: Item) => void;
   onBulkDeleted: () => void;
 }) {
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [groupEditOpen, setGroupEditOpen] = useState(false);
   const [groupEditData, setGroupEditData] = useState<Record<string, unknown>>({});
@@ -766,7 +795,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
 
       return (
         <img
-          src={api.images.thumbUrl(item.id, match.id)}
+          src={api.images.thumbUrl(item.uuid, match.id)}
           alt=""
           className="h-10 w-10 rounded object-cover"
         />
@@ -783,10 +812,10 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
   });
   const fields = Array.from(allFields);
 
-  function toggleItem(id: number) {
+  function toggleItem(uuid: string) {
     setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(uuid)) next.delete(uuid); else next.add(uuid);
       return next;
     });
   }
@@ -795,7 +824,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
     if (selected.size === items.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(items.map(i => i.id)));
+      setSelected(new Set(items.map(i => i.uuid)));
     }
   }
 
@@ -804,8 +833,8 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
     if (!confirm(`Delete ${selected.size} item${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
     setDeleting(true);
     try {
-      for (const id of selected) {
-        await api.items.delete(groupId, id);
+      for (const uuid of selected) {
+        await api.items.delete(groupId, uuid);
       }
       // Reload items after bulk delete
       setSelected(new Set());
@@ -816,7 +845,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
   }
 
   // Group Edit: check if all selected items share the same schema
-  const selectedItems = items.filter(i => selected.has(i.id));
+  const selectedItems = items.filter(i => selected.has(i.uuid));
   const selectedSchemaIds = new Set(selectedItems.map(i => i.schema_id));
   const canGroupEdit = selected.size > 0 && selectedSchemaIds.size === 1;
   const groupEditSchema = canGroupEdit ? schemaMap.get([...selectedSchemaIds][0]) : null;
@@ -843,7 +872,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
       }
       for (const item of selectedItems) {
         const merged = { ...item.data, ...patch };
-        await api.items.update(groupId, item.id, { data: merged });
+        await api.items.update(groupId, item.uuid, { data: merged });
       }
       setGroupEditOpen(false);
       setSelected(new Set());
@@ -903,26 +932,26 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
         </thead>
         <tbody>
           {items.map(item => (
-            <tr key={item.id} className={`border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50 ${selected.has(item.id) ? 'bg-stone-50 dark:bg-stone-800/30' : ''}`}>
+            <tr key={item.uuid} className={`border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50 ${selected.has(item.uuid) ? 'bg-stone-50 dark:bg-stone-800/30' : ''}`}>
               <td className="py-2 px-2 w-8">
                 <input
                   type="checkbox"
-                  checked={selected.has(item.id)}
-                  onChange={() => toggleItem(item.id)}
+                  checked={selected.has(item.uuid)}
+                  onChange={() => toggleItem(item.uuid)}
                   className="rounded border-stone-300 dark:border-stone-600"
                 />
               </td>
               <td className="py-2 px-3">
                 {item.images[0] ? (
                   <img
-                    src={api.images.thumbUrl(item.id, item.images[0].id)}
+                    src={api.images.thumbUrl(item.uuid, item.images[0].id)}
                     alt=""
                     className="h-10 w-10 rounded object-cover"
                   />
                 ) : null}
               </td>
               <td className="py-2 px-3">
-                <Link to={`/groups/${groupId}/items/${item.id}`} className="text-stone-800 dark:text-stone-200 hover:underline font-medium">
+                <Link to={`/groups/${groupId}/items/${item.uuid}`} className="text-stone-800 dark:text-stone-200 hover:underline font-medium">
                   {item.name || `Item #${item.id}`}
                 </Link>
               </td>
@@ -944,7 +973,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                 <button onClick={() => onDuplicate(item)} className="text-stone-300 dark:text-stone-600 hover:text-stone-500 dark:hover:text-stone-400" title="Duplicate">
                   ⧉
                 </button>
-                <button onClick={() => onDelete(item.id)} className="text-stone-300 dark:text-stone-600 hover:text-red-400">
+                <button onClick={() => onDelete(item.uuid)} className="text-stone-300 dark:text-stone-600 hover:text-red-400">
                   ✕
                 </button>
               </td>

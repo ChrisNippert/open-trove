@@ -94,12 +94,12 @@ async def create_item(group_id: int, body: ItemCreate, db: AsyncSession = Depend
     return _item_to_out(item)
 
 
-@router.get("/{item_id}", response_model=ItemOut)
-async def get_item(group_id: int, item_id: int, db: AsyncSession = Depends(get_db)):
+@router.get("/{item_uuid}", response_model=ItemOut)
+async def get_item(group_id: int, item_uuid: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Item)
         .options(selectinload(Item.tags), selectinload(Item.images))
-        .where(Item.id == item_id, Item.group_id == group_id)
+        .where(Item.uuid == item_uuid, Item.group_id == group_id)
     )
     item = result.scalar_one_or_none()
     if not item:
@@ -107,12 +107,12 @@ async def get_item(group_id: int, item_id: int, db: AsyncSession = Depends(get_d
     return _item_to_out(item)
 
 
-@router.put("/{item_id}", response_model=ItemOut)
-async def update_item(group_id: int, item_id: int, body: ItemUpdate, db: AsyncSession = Depends(get_db)):
+@router.put("/{item_uuid}", response_model=ItemOut)
+async def update_item(group_id: int, item_uuid: str, body: ItemUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Item)
         .options(selectinload(Item.tags), selectinload(Item.images))
-        .where(Item.id == item_id, Item.group_id == group_id)
+        .where(Item.uuid == item_uuid, Item.group_id == group_id)
     )
     item = result.scalar_one_or_none()
     if not item:
@@ -130,7 +130,7 @@ async def update_item(group_id: int, item_id: int, body: ItemUpdate, db: AsyncSe
     if body.tags is not None:
         # Remove old tags
         old_tags = await db.execute(
-            select(ItemTag).where(ItemTag.item_id == item_id)
+            select(ItemTag).where(ItemTag.item_id == item.id)
         )
         for t in old_tags.scalars().all():
             await db.delete(t)
@@ -152,14 +152,14 @@ async def update_item(group_id: int, item_id: int, body: ItemUpdate, db: AsyncSe
     return _item_to_out(item)
 
 
-@router.delete("/{item_id}", status_code=204)
-async def delete_item(group_id: int, item_id: int, db: AsyncSession = Depends(get_db)):
+@router.delete("/{item_uuid}", status_code=204)
+async def delete_item(group_id: int, item_uuid: str, db: AsyncSession = Depends(get_db)):
     from ..config import IMAGES_DIR
 
     result = await db.execute(
         select(Item)
         .options(selectinload(Item.images))
-        .where(Item.id == item_id, Item.group_id == group_id)
+        .where(Item.uuid == item_uuid, Item.group_id == group_id)
     )
     item = result.scalar_one_or_none()
     if not item:

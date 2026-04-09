@@ -16,9 +16,17 @@ from ..models import Item, ItemImage
 from ..config import IMAGES_DIR, MAX_IMAGE_SIZE, THUMBNAIL_SIZE
 from ..schemas import ImageOut
 
-router = APIRouter(prefix="/api/items/{item_id}/images", tags=["images"])
+router = APIRouter(prefix="/api/items/{item_uuid}/images", tags=["images"])
 
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+async def _resolve_item(item_uuid: str, db: AsyncSession) -> Item:
+    result = await db.execute(select(Item).where(Item.uuid == item_uuid))
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(404, "Item not found")
+    return item
 
 
 def _generate_filename(original: str, suffix: str = "") -> str:
@@ -41,13 +49,11 @@ def _create_thumbnail(image_path: Path, thumb_path: Path):
 
 @router.post("", response_model=ImageOut, status_code=201)
 async def upload_image(
-    item_id: int,
+    item_uuid: str,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    item = await db.get(Item, item_id)
-    if not item:
-        raise HTTPException(404, "Item not found")
+    item = await _resolve_item(item_uuid, db)
 
     if file.content_type not in ALLOWED_MIME:
         raise HTTPException(400, f"File type not allowed. Allowed: {', '.join(ALLOWED_MIME)}")
@@ -69,14 +75,14 @@ async def upload_image(
     # Get current max sort order
     result = await db.execute(
         select(ItemImage.sort_order)
-        .where(ItemImage.item_id == item_id)
+        .where(ItemImage.item_id == item.id)
         .order_by(ItemImage.sort_order.desc())
         .limit(1)
     )
     max_order = result.scalar() or 0
 
     image = ItemImage(
-        item_id=item_id,
+        item_id=item.id,
         filename=filename,
         original_filename=file.filename or "image",
         thumbnail_filename=actual_thumb,
@@ -91,19 +97,21 @@ async def upload_image(
 
 
 @router.get("", response_model=list[ImageOut])
-async def list_images(item_id: int, db: AsyncSession = Depends(get_db)):
+async def list_images(item_uuid: str, db: AsyncSession = Depends(get_db)):
+    item = await _resolve_item(item_uuid, db)
     result = await db.execute(
         select(ItemImage)
-        .where(ItemImage.item_id == item_id)
+        .where(ItemImage.item_id == item.id)
         .order_by(ItemImage.sort_order)
     )
     return [ImageOut.model_validate(img) for img in result.scalars().all()]
 
 
 @router.delete("/{image_id}", status_code=204)
-async def delete_image(item_id: int, image_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_image(item_uuid: str, image_id: int, db: AsyncSession = Depends(get_db)):
+    item = await _resolve_item(item_uuid, db)
     image = await db.get(ItemImage, image_id)
-    if not image or image.item_id != item_id:
+    if not image or image.item_id != item.id:
         raise HTTPException(404, "Image not found")
 
     # Delete files
@@ -120,16 +128,17 @@ async def delete_image(item_id: int, image_id: int, db: AsyncSession = Depends(g
 
 
 @router.post("/{image_id}/set-primary", response_model=ImageOut)
-async def set_primary_image(item_id: int, image_id: int, db: AsyncSession = Depends(get_db)):
+async def set_primary_image(item_uuid: str, image_id: int, db: AsyncSession = Depends(get_db)):
     """Set an image as the primary (thumbnail) by giving it the lowest sort_order."""
+    item = await _resolve_item(item_uuid, db)
     image = await db.get(ItemImage, image_id)
-    if not image or image.item_id != item_id:
+    if not image or image.item_id != item.id:
         raise HTTPException(404, "Image not found")
 
     # Get all images for this item ordered by sort_order
     result = await db.execute(
         select(ItemImage)
-        .where(ItemImage.item_id == item_id)
+        .where(ItemImage.item_id == item.id)
         .order_by(ItemImage.sort_order)
     )
     images = result.scalars().all()
@@ -150,9 +159,10 @@ async def set_primary_image(item_id: int, image_id: int, db: AsyncSession = Depe
 
 # Serve image files
 @router.get("/{image_id}/file")
-async def serve_image(item_id: int, image_id: int, db: AsyncSession = Depends(get_db)):
+async def serve_image(item_uuid: str, image_id: int, db: AsyncSession = Depends(get_db)):
+    item = await _resolve_item(item_uuid, db)
     image = await db.get(ItemImage, image_id)
-    if not image or image.item_id != item_id:
+    if not image or image.item_id != item.id:
         raise HTTPException(404, "Image not found")
     file_path = IMAGES_DIR / image.filename
     if not file_path.exists():
@@ -161,9 +171,10 @@ async def serve_image(item_id: int, image_id: int, db: AsyncSession = Depends(ge
 
 
 @router.get("/{image_id}/thumbnail")
-async def serve_thumbnail(item_id: int, image_id: int, db: AsyncSession = Depends(get_db)):
+async def serve_thumbnail(item_uuid: str, image_id: int, db: AsyncSession = Depends(get_db)):
+    item = await _resolve_item(item_uuid, db)
     image = await db.get(ItemImage, image_id)
-    if not image or image.item_id != item_id:
+    if not image or image.item_id != item.id:
         raise HTTPException(404, "Image not found")
     if not image.thumbnail_filename:
         raise HTTPException(404, "No thumbnail available")
@@ -179,14 +190,12 @@ class ImageUrlRequest(BaseModel):
 
 @router.post("/from-url", response_model=ImageOut, status_code=201)
 async def upload_image_from_url(
-    item_id: int,
+    item_uuid: str,
     body: ImageUrlRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Download an image from a URL and attach it to an item."""
-    item = await db.get(Item, item_id)
-    if not item:
-        raise HTTPException(404, "Item not found")
+    item = await _resolve_item(item_uuid, db)
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
@@ -217,14 +226,14 @@ async def upload_image_from_url(
 
     result = await db.execute(
         select(ItemImage.sort_order)
-        .where(ItemImage.item_id == item_id)
+        .where(ItemImage.item_id == item.id)
         .order_by(ItemImage.sort_order.desc())
         .limit(1)
     )
     max_order = result.scalar() or 0
 
     image = ItemImage(
-        item_id=item_id,
+        item_id=item.id,
         filename=filename,
         original_filename=original_name,
         thumbnail_filename=actual_thumb,

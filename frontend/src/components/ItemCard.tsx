@@ -14,12 +14,12 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
   const category = item.data.category;
   const hasCategory = typeof category === 'string' || typeof category === 'number';
   const thumbUrl = hasImage
-    ? api.images.thumbUrl(item.id, item.images[0].id)
+    ? api.images.thumbUrl(item.uuid, item.images[0].id)
     : null;
 
   return (
     <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group">
-      <Link to={`/groups/${groupId}/items/${item.id}`}>
+      <Link to={`/groups/${groupId}/items/${item.uuid}`}>
         {/* Image area */}
         <div className="aspect-square bg-stone-100 dark:bg-stone-800 relative overflow-hidden">
           {thumbUrl ? (
