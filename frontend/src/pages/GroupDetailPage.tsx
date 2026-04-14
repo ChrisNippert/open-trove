@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { Group, ItemSchema, Item } from '../types';
 import ItemCard from '../components/ItemCard';
@@ -129,9 +129,19 @@ export default function GroupDetailPage() {
   const [editingGroup, setEditingGroup] = useState(false);
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupDesc, setEditGroupDesc] = useState('');
-  const [sortField, setSortField] = useState<string>('');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [sortField, setSortFieldRaw] = useState<string>(searchParams.get('sort') || '');
+  const [sortDir, setSortDirRaw] = useState<'asc' | 'desc'>((searchParams.get('dir') as 'asc' | 'desc') || 'desc');
+  const setSortField = (v: string) => {
+    setSortFieldRaw(v);
+    setSearchParams(prev => { const p = new URLSearchParams(prev); if (v) p.set('sort', v); else p.delete('sort'); return p; }, { replace: true });
+  };
+  const setSortDir = (v: 'asc' | 'desc') => {
+    setSortDirRaw(v);
+    setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('dir', v); return p; }, { replace: true });
+  };
   const [thumbVersion, setThumbVersion] = useState(0);
+  const [gridCols, setGridCols] = useState(4);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,14 +169,26 @@ export default function GroupDetailPage() {
       setGroup(g);
       setSchemas(s);
       setItems(i);
+      // Apply default sort from schema if no user sort set
+      if (!searchParams.get('sort') && s.length > 0) {
+        const def = s[0].definition;
+        if (def?.default_sort) {
+          setSortFieldRaw(def.default_sort);
+          setSortDirRaw(def.default_sort_dir || 'asc');
+        }
+      }
     } finally {
       setLoading(false);
     }
   }
 
   async function loadItems() {
-    const i = await api.items.list(gid, { schema_id: selectedSchema });
+    const [i, s] = await Promise.all([
+      api.items.list(gid, { schema_id: selectedSchema }),
+      api.schemas.list(gid),
+    ]);
     setItems(i);
+    setSchemas(s);
   }
 
   useEffect(() => {
@@ -445,12 +467,14 @@ export default function GroupDetailPage() {
                 <input
                   value={editGroupName}
                   onChange={e => setEditGroupName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveGroupEdit(); }}
                   className="text-2xl font-semibold text-stone-800 dark:text-stone-100 bg-transparent border-b border-stone-300 dark:border-stone-600 focus:border-stone-500 focus:outline-none w-full"
                   autoFocus
                 />
                 <input
                   value={editGroupDesc}
                   onChange={e => setEditGroupDesc(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveGroupEdit(); }}
                   className="text-sm text-stone-400 dark:text-stone-500 bg-transparent border-b border-stone-300 dark:border-stone-600 focus:border-stone-500 focus:outline-none w-full"
                   placeholder="Description (optional)"
                 />
@@ -621,7 +645,7 @@ export default function GroupDetailPage() {
               !selectedSchema ? 'bg-stone-800 dark:bg-stone-200 text-white dark:text-stone-900' : 'bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700'
             }`}
           >
-            All ({items.length})
+            All ({schemas.reduce((sum, s) => sum + (s.item_count ?? 0), 0)})
           </button>
           {schemas.map(s => (
             <div key={s.id} className="flex items-stretch group/schema">
@@ -670,6 +694,20 @@ export default function GroupDetailPage() {
           </svg>
         </button>
         <span className="text-sm text-stone-400 dark:text-stone-500 ml-2">{sortedItems.length} items</span>
+        {viewMode === 'grid' && (
+          <div className="flex items-center gap-1 ml-2 border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden">
+            {[2, 3, 4, 5].map(n => (
+              <button
+                key={n}
+                onClick={() => setGridCols(n)}
+                className={`px-2 py-1 text-xs ${gridCols === n ? 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200' : 'text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800'}`}
+                title={`${n} per row`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <label className="text-xs text-stone-400 dark:text-stone-500">Sort by:</label>
           <select
@@ -682,7 +720,7 @@ export default function GroupDetailPage() {
             {sortableFields.map(f => <option key={f} value={f}>{f}</option>)}
           </select>
           <button
-            onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')}
+            onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
             className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 px-1"
             title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
           >
@@ -713,7 +751,7 @@ export default function GroupDetailPage() {
           </p>
         </div>
       ) : viewMode === 'grid' ? (
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
           {sortedItems.map(item => (
             <div key={item.id} className="relative group/card">
               <ItemCard
@@ -734,7 +772,10 @@ export default function GroupDetailPage() {
           ))}
         </div>
       ) : (
-        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} onBulkDeleted={loadItems} />
+        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} onBulkDeleted={loadItems} sortField={sortField} sortDir={sortDir} onSort={(field) => {
+          if (sortField === field) { setSortDir(sortDir === 'asc' ? 'desc' : 'asc'); }
+          else { setSortField(field); setSortDir('asc'); }
+        }} />
       )}
 
       {/* Create Item Modal */}
@@ -753,13 +794,16 @@ export default function GroupDetailPage() {
   );
 }
 
-function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDeleted }: {
+function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDeleted, sortField, sortDir, onSort }: {
   items: Item[];
   groupId: number;
   schemas: ItemSchema[];
   onDelete: (uuid: string) => void;
   onDuplicate: (item: Item) => void;
   onBulkDeleted: () => void;
+  sortField: string;
+  sortDir: 'asc' | 'desc';
+  onSort: (field: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -910,10 +954,11 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
           </button>
         </div>
       )}
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm" style={{ minWidth: 'max-content' }}>
         <thead>
           <tr className="border-b border-stone-200 dark:border-stone-700">
-            <th className="py-2 px-2 w-8">
+            <th className="py-2 px-2 w-8 sticky left-0 z-10 bg-white dark:bg-stone-900">
               <input
                 type="checkbox"
                 checked={selected.size === items.length && items.length > 0}
@@ -921,10 +966,14 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                 className="rounded border-stone-300 dark:border-stone-600"
               />
             </th>
-            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Image</th>
-            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Name</th>
-            {fields.slice(0, 6).filter(f => f !== 'name').map(f => (
-              <th key={f} className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">{f}</th>
+            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium sticky left-8 z-10 bg-white dark:bg-stone-900">Image</th>
+            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium sticky left-[5.5rem] z-10 bg-white dark:bg-stone-900 cursor-pointer hover:text-stone-700 dark:hover:text-stone-200 select-none" onClick={() => onSort('name')}>
+              Name {sortField === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            {fields.filter(f => f !== 'name').map(f => (
+              <th key={f} className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap cursor-pointer hover:text-stone-700 dark:hover:text-stone-200 select-none" onClick={() => onSort(f)}>
+                {f} {sortField === f ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+              </th>
             ))}
             <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium">Tags</th>
             <th className="py-2 px-3"></th>
@@ -933,7 +982,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
         <tbody>
           {items.map(item => (
             <tr key={item.uuid} className={`border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50 ${selected.has(item.uuid) ? 'bg-stone-50 dark:bg-stone-800/30' : ''}`}>
-              <td className="py-2 px-2 w-8">
+              <td className="py-2 px-2 w-8 sticky left-0 z-10 bg-inherit">
                 <input
                   type="checkbox"
                   checked={selected.has(item.uuid)}
@@ -941,7 +990,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                   className="rounded border-stone-300 dark:border-stone-600"
                 />
               </td>
-              <td className="py-2 px-3">
+              <td className="py-2 px-3 sticky left-8 z-10 bg-inherit">
                 {item.images[0] ? (
                   <img
                     src={api.images.thumbUrl(item.uuid, item.images[0].id)}
@@ -950,13 +999,13 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                   />
                 ) : null}
               </td>
-              <td className="py-2 px-3">
-                <Link to={`/groups/${groupId}/items/${item.uuid}`} className="text-stone-800 dark:text-stone-200 hover:underline font-medium">
+              <td className="py-2 px-3 sticky left-[5.5rem] z-10 bg-inherit">
+                <Link to={`/groups/${groupId}/items/${item.uuid}`} className="text-stone-800 dark:text-stone-200 hover:underline font-medium whitespace-nowrap">
                   {item.name || `Item #${item.id}`}
                 </Link>
               </td>
-              {fields.slice(0, 6).filter(f => f !== 'name').map(f => (
-                <td key={f} className="py-2 px-3 text-stone-600 dark:text-stone-400">
+              {fields.filter(f => f !== 'name').map(f => (
+                <td key={f} className="py-2 px-3 text-stone-600 dark:text-stone-400 whitespace-nowrap">
                   {renderCellValue(item, f)}
                 </td>
               ))}
@@ -981,6 +1030,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
           ))}
         </tbody>
       </table>
+      </div>
 
       {/* Group Edit Modal */}
       {groupEditOpen && groupEditSchema && (
@@ -1100,11 +1150,17 @@ function GroupEditFieldInput({ fieldDef, value, onChange }: { fieldDef: { type: 
 
 function formatValue(val: unknown): string {
   if (val == null) return '';
+  if (typeof val === 'object' && 'name' in (val as Record<string, unknown>)) {
+    return (val as { name: string }).name;
+  }
   if (typeof val === 'object' && 'value' in (val as Record<string, unknown>) && 'unit' in (val as Record<string, unknown>)) {
     const v = val as { value: number; unit: string };
     return `${v.value} ${v.unit}`;
   }
-  if (Array.isArray(val)) return val.join(', ');
+  if (Array.isArray(val)) return val.map(item => {
+    if (item && typeof item === 'object' && 'name' in item) return item.name;
+    return String(item);
+  }).join(', ');
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
   return String(val);
 }

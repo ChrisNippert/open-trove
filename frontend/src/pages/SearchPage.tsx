@@ -89,6 +89,8 @@ export default function SearchPage() {
   const [rangeFilters, setRangeFilters] = useState<Record<string, { min: string; max: string }>>(() => restoredFilterState.rangeFilters);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [facetsLoading, setFacetsLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [gridCols, setGridCols] = useState(4);
 
   // Range version counter to trigger search after debounce
   const [rangeVersion, setRangeVersion] = useState(0);
@@ -125,6 +127,7 @@ export default function SearchPage() {
         groupFilter,
         filterArray.length ? JSON.stringify(filterArray) : undefined,
         tagParam || undefined,
+        schemaFilter || undefined,
       ).then(data => {
         setFacets(data.facets);
         setTags(data.tags);
@@ -140,7 +143,7 @@ export default function SearchPage() {
       setDropdownFilters({});
       setRangeFilters({});
     }
-  }, [groupFilter, checkboxFilters, dropdownFilters, rangeVersion, selectedTags]);
+  }, [groupFilter, schemaFilter, checkboxFilters, dropdownFilters, rangeVersion, selectedTags]);
 
   const buildFilterArray = useCallback(() => {
     const filters: { field: string; op: string; value: unknown }[] = [];
@@ -151,10 +154,16 @@ export default function SearchPage() {
         filters.push({ field, op: 'in', value: arr });
       }
     }
-    // Dropdown filters → exact match (single-select)
+    // Dropdown filters → exact match (single-select), hierarchy parent uses LIKE
     for (const [field, value] of Object.entries(dropdownFilters)) {
       if (value) {
-        filters.push({ field, op: '=', value });
+        const facet = facets[field];
+        // For hierarchy fields with a parent-only selection, match children too
+        if (facet?.type === 'hierarchy' && !value.includes(' > ')) {
+          filters.push({ field, op: 'in', value: [value, ...((facet.options || []).filter(o => o.value.startsWith(value + ' > ')).map(o => o.value))] });
+        } else {
+          filters.push({ field, op: '=', value });
+        }
       }
     }
     // Range filters → >= and <=
@@ -278,11 +287,18 @@ export default function SearchPage() {
     const entries = Object.entries(data).slice(0, 4);
     return entries.map(([k, v]) => {
       let display = '';
-      if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
+      if (v && typeof v === 'object' && 'name' in (v as Record<string, unknown>)) {
+        display = (v as { name: string }).name;
+      } else if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
         const u = v as { value: number; unit: string };
         display = `${u.value} ${u.unit}`;
       } else if (Array.isArray(v)) {
-        display = v.join(', ');
+        display = v.map(item => {
+          if (item && typeof item === 'object' && 'name' in item) return item.name;
+          return String(item);
+        }).join(', ');
+      } else if (typeof v === 'boolean') {
+        display = v ? 'Yes' : 'No';
       } else {
         const s = String(v ?? '');
         display = s.length > 60 ? s.slice(0, 60) + '…' : s;
@@ -299,7 +315,7 @@ export default function SearchPage() {
     || Object.values(checkboxFilters).some(s => s.size > 0)
     || Object.values(dropdownFilters).some(v => v)
     || Object.values(rangeFilters).some(r => r.min || r.max);
-  const hasSidebar = Object.keys(facets).length > 0 || tags.length > 0;
+  const hasSidebar = Object.keys(facets).length > 0 || tags.length > 0 || hasAnyFilter;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const activeFilterCount = (selectedTags.size)
@@ -437,7 +453,7 @@ export default function SearchPage() {
                 const opts = facet.options || [];
                 if (opts.length === 0) return null;
                 const selectedVal = dropdownFilters[fieldName] || '';
-                // Group options by parent for display
+                // Group options by parent
                 const parents: string[] = [];
                 const childrenMap: Record<string, { value: string; count: number }[]> = {};
                 for (const opt of opts) {
@@ -449,26 +465,34 @@ export default function SearchPage() {
                     parents.push(opt.value);
                   }
                 }
+                const selectedParent = selectedVal.includes(' > ') ? selectedVal.split(' > ')[0] : selectedVal;
+                const selectedChild = selectedVal.includes(' > ') ? selectedVal : '';
+                const childOpts = selectedParent ? (childrenMap[selectedParent] || []) : [];
                 return (
                   <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
                     <select
-                      value={selectedVal}
+                      value={selectedParent}
                       onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value }))}
                       className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
                     >
                       <option value="">Any</option>
                       {parents.map(p => {
                         const pOpt = opts.find(o => o.value === p);
-                        return (
-                          <optgroup key={p} label={p}>
-                            <option value={p}>{p} (all) ({pOpt?.count ?? 0})</option>
-                            {(childrenMap[p] || []).map(c => (
-                              <option key={c.value} value={c.value}>{c.value.split(' > ')[1]} ({c.count})</option>
-                            ))}
-                          </optgroup>
-                        );
+                        return <option key={p} value={p}>{p} ({pOpt?.count ?? 0})</option>;
                       })}
                     </select>
+                    {selectedParent && childOpts.length > 0 && (
+                      <select
+                        value={selectedChild}
+                        onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value || selectedParent }))}
+                        className="w-full mt-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                      >
+                        <option value="">All</option>
+                        {childOpts.map(c => (
+                          <option key={c.value} value={c.value}>{c.value.split(' > ')[1]} ({c.count})</option>
+                        ))}
+                      </select>
+                    )}
                   </FilterSection>
                 );
               }
@@ -616,7 +640,81 @@ export default function SearchPage() {
 
           {!loading && results.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm text-stone-400 dark:text-stone-500 mb-3">{results.length} result{results.length === 1 ? '' : 's'}</p>
+              <div className="flex items-center gap-2 mb-3">
+                <p className="text-sm text-stone-400 dark:text-stone-500">{results.length} result{results.length === 1 ? '' : 's'}</p>
+                <div className="ml-auto flex items-center gap-1">
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-stone-200 dark:bg-stone-700' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}
+                    title="List view"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-stone-600 dark:text-stone-300" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-stone-200 dark:bg-stone-700' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}
+                    title="Grid view"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-stone-600 dark:text-stone-300" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                  </button>
+                </div>
+                {viewMode === 'grid' && (
+                  <div className="flex items-center gap-1 border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden">
+                    {[2, 3, 4, 5].map(n => (
+                      <button
+                        key={n}
+                        onClick={() => setGridCols(n)}
+                        className={`px-2 py-1 text-xs ${gridCols === n ? 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200' : 'text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800'}`}
+                        title={`${n} per row`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {viewMode === 'grid' ? (
+                <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
+                  {results.map(item => {
+                    const primaryImage = item.images?.[0];
+                    const thumbUrl = primaryImage ? api.images.url(item.uuid, primaryImage.id) : null;
+                    return (
+                      <Link
+                        key={item.id}
+                        to={`/groups/${item.group_id}/items/${item.uuid}`}
+                        className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                      >
+                        <div className="aspect-square bg-stone-100 dark:bg-stone-800 relative overflow-hidden">
+                          {thumbUrl ? (
+                            <img src={thumbUrl} alt="" className="w-full h-full object-contain" loading="lazy" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-stone-300 dark:text-stone-600">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-3">
+                          <h3 className="font-medium text-stone-800 dark:text-stone-100 text-sm truncate">{item.name || `Item #${item.id}`}</h3>
+                          {item.tags && item.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {item.tags.slice(0, 3).map(t => (
+                                <span key={t} className="text-[10px] bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded">{t}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : (
+              <div className="space-y-2">
               {results.map(item => {
                 const primaryImage = item.images?.[0];
                 return (
@@ -651,6 +749,8 @@ export default function SearchPage() {
                 </Link>
                 );
               })}
+              </div>
+              )}
             </div>
           )}
         </div>

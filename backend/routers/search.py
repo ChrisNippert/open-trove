@@ -175,6 +175,7 @@ FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit", "hi
 @router.get("/facets")
 async def get_facets(
     group_id: int,
+    schema_id: int | None = None,
     filters: str | None = None,
     tag: str | None = None,
     db: AsyncSession = Depends(get_db),
@@ -233,15 +234,19 @@ async def get_facets(
     # Build base filter clause for SQL queries
     if base_ids is not None:
         if not base_ids:
-            return {"facets": {}, "tags": []}
-        id_list = ",".join(str(int(i)) for i in base_ids)
-        base_clause = f"AND items.id IN ({id_list}) "
+            # No items match filters — still build facet structure with zero counts
+            id_list = "-1"  # impossible ID to get zero counts from DB
+            base_clause = f"AND items.id IN ({id_list}) "
+        else:
+            id_list = ",".join(str(int(i)) for i in base_ids)
+            base_clause = f"AND items.id IN ({id_list}) "
     else:
         base_clause = ""
 
-    schemas_result = await db.execute(
-        select(ItemSchema).where(ItemSchema.group_id == group_id)
-    )
+    schemas_query = select(ItemSchema).where(ItemSchema.group_id == group_id)
+    if schema_id is not None:
+        schemas_query = schemas_query.where(ItemSchema.id == schema_id)
+    schemas_result = await db.execute(schemas_query)
     schemas = schemas_result.scalars().all()
 
     facets: dict[str, dict] = {}
@@ -343,12 +348,20 @@ async def get_facets(
                 elif ftype == "string":
                     if not field_def.get("filterable"):
                         continue
+                    # Handle both scalar strings and JSON arrays of strings
                     count_result = await db.execute(text(
-                        "SELECT json_extract(data, :path) as val, COUNT(*) as cnt "
-                        f"FROM items WHERE group_id = :gid {base_clause}"
-                        "AND json_extract(data, :path) IS NOT NULL "
-                        "AND json_extract(data, :path) != '' "
-                        "GROUP BY val ORDER BY cnt DESC, val ASC"
+                        "SELECT j.value as val, COUNT(DISTINCT items.id) as cnt "
+                        "FROM items, json_each("
+                        "  CASE WHEN json_type(items.data, :path) = 'array' "
+                        "    THEN json_extract(items.data, :path) "
+                        "    ELSE json_array(json_extract(items.data, :path)) "
+                        "  END"
+                        ") j "
+                        f"WHERE items.group_id = :gid {base_clause}"
+                        "AND json_extract(items.data, :path) IS NOT NULL "
+                        "AND json_extract(items.data, :path) != '' "
+                        "AND j.value IS NOT NULL AND j.value != '' "
+                        "GROUP BY j.value ORDER BY cnt DESC, j.value ASC"
                     ), {"path": f"$.{field_name}", "gid": group_id})
                     options = [
                         {"value": str(r[0]), "count": r[1]}

@@ -26,6 +26,9 @@ export interface FieldDef {
   placeholder?: string;
   hierarchy_options?: Record<string, string[]>;
   filterable?: boolean;
+  allow_custom?: boolean;
+  rating_max?: number;
+  rating_style?: 'stars' | 'number';
 }
 
 export interface SchemaSections {
@@ -36,6 +39,8 @@ export interface SchemaSections {
 
 export interface SchemaDefinition {
   sections: SchemaSections;
+  default_sort?: string;
+  default_sort_dir?: 'asc' | 'desc';
 }
 
 export interface ItemSchema {

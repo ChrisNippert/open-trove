@@ -50,6 +50,11 @@ export const api = {
       request<ItemSchema>(`/groups/${groupId}/schemas/${schemaId}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (groupId: number, schemaId: number) =>
       request<void>(`/groups/${groupId}/schemas/${schemaId}`, { method: 'DELETE' }),
+    renameField: (groupId: number, schemaId: number, oldName: string, newName: string) =>
+      request<{ updated: number }>(`/groups/${groupId}/schemas/${schemaId}/rename-field`, {
+        method: 'POST',
+        body: JSON.stringify({ old_name: oldName, new_name: newName }),
+      }),
   },
 
   items: {
@@ -115,10 +120,11 @@ export const api = {
     return request<Item[]>(`/search?${params}`);
   },
 
-  facets: (groupId: number, filters?: string, tag?: string) => {
+  facets: (groupId: number, filters?: string, tag?: string, schemaId?: number) => {
     const params = new URLSearchParams({ group_id: String(groupId) });
     if (filters) params.set('filters', filters);
     if (tag) params.set('tag', tag);
+    if (schemaId) params.set('schema_id', String(schemaId));
     return request<{ facets: Record<string, { type: string; field: string; options?: { value: string; count: number }[]; min?: number | null; max?: number | null; unit?: string; true_count?: number; false_count?: number }>; tags: { tag: string; count: number }[] }>(`/search/facets?${params}`);
   },
 

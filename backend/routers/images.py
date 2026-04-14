@@ -39,7 +39,11 @@ def _create_thumbnail(image_path: Path, thumb_path: Path):
         with PILImage.open(image_path) as img:
             img.thumbnail(THUMBNAIL_SIZE, PILImage.Resampling.LANCZOS)
             if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
+                background = PILImage.new("RGB", img.size, (255, 255, 255))
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+                background.paste(img, mask=img.split()[3])
+                img = background
             thumb_path_jpg = thumb_path.with_suffix(".jpg")
             img.save(thumb_path_jpg, "JPEG", quality=85)
             return thumb_path_jpg.name

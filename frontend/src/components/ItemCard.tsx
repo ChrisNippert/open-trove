@@ -14,7 +14,7 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
   const category = item.data.category;
   const hasCategory = typeof category === 'string' || typeof category === 'number';
   const thumbUrl = hasImage
-    ? api.images.thumbUrl(item.uuid, item.images[0].id)
+    ? api.images.url(item.uuid, item.images[0].id)
     : null;
 
   return (
@@ -23,7 +23,7 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
         {/* Image area */}
         <div className="aspect-square bg-stone-100 dark:bg-stone-800 relative overflow-hidden">
           {thumbUrl ? (
-            <img src={thumbUrl} alt={name} className="w-full h-full object-cover" />
+            <img src={thumbUrl} alt={name} className="w-full h-full object-contain" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-stone-300 dark:text-stone-600">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">

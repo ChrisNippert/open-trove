@@ -90,6 +90,33 @@ async def update_schema(group_id: int, schema_id: int, body: ItemSchemaUpdate, d
     )
 
 
+@router.post("/{schema_id}/rename-field", status_code=200)
+async def rename_field(group_id: int, schema_id: int, body: dict, db: AsyncSession = Depends(get_db)):
+    """Rename a field across all items of a schema, migrating data from old to new key."""
+    old_name = body.get("old_name", "").strip()
+    new_name = body.get("new_name", "").strip()
+    if not old_name or not new_name or old_name == new_name:
+        raise HTTPException(400, "old_name and new_name are required and must differ")
+
+    schema = await db.get(ItemSchema, schema_id)
+    if not schema or schema.group_id != group_id:
+        raise HTTPException(404, "Schema not found")
+
+    result = await db.execute(
+        select(Item).where(Item.schema_id == schema_id)
+    )
+    items = result.scalars().all()
+    updated = 0
+    for item in items:
+        data = json.loads(item.data) if item.data else {}
+        if old_name in data:
+            data[new_name] = data.pop(old_name)
+            item.data = json.dumps(data)
+            updated += 1
+    await db.commit()
+    return {"updated": updated}
+
+
 @router.delete("/{schema_id}", status_code=204)
 async def delete_schema(group_id: int, schema_id: int, db: AsyncSession = Depends(get_db)):
     schema = await db.get(ItemSchema, schema_id)

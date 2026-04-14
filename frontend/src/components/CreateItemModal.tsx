@@ -471,14 +471,29 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
     return (
       <div>
         <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
-        <select
-          value={String(value || '')}
-          onChange={e => onChange(e.target.value)}
-          className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
-        >
-          <option value="">Select...</option>
-          {options.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
+        {def.allow_custom ? (
+          <>
+            <input
+              list={`create-dd-${name}`}
+              value={String(value || '')}
+              onChange={e => onChange(e.target.value)}
+              placeholder="Select or type..."
+              className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+            />
+            <datalist id={`create-dd-${name}`}>
+              {options.map(o => <option key={o} value={o} />)}
+            </datalist>
+          </>
+        ) : (
+          <select
+            value={String(value || '')}
+            onChange={e => onChange(e.target.value)}
+            className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          >
+            <option value="">Select...</option>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        )}
       </div>
     );
   }
@@ -532,6 +547,7 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
           step={def.type === 'float' ? 'any' : '1'}
           value={value != null ? String(value) : ''}
           onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
+          onKeyDown={e => { const blocked = def.type === 'int' ? ['e','E','+','.'] : ['e','E','+']; if (blocked.includes(e.key)) e.preventDefault(); }}
           className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
         />
       </div>
@@ -540,24 +556,29 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
 
   if (def.type === 'unit') {
     const unitVal = typeof value === 'object' && value != null ? value as { value: number; unit: string } : { value: 0, unit: def.default_unit || '' };
+    const unitInputs = (
+      <div className="flex gap-2">
+        <input
+          type="number"
+          step="any"
+          value={unitVal.value != null ? unitVal.value : ''}
+          onChange={e => onChange({ ...unitVal, value: e.target.value ? Number(e.target.value) : 0 })}
+          onKeyDown={e => { if (['e','E','+'].includes(e.key)) e.preventDefault(); }}
+          className="flex-1 px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+        />
+        <input
+          value={unitVal.unit}
+          onChange={e => onChange({ ...unitVal, unit: e.target.value })}
+          className="w-20 px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          placeholder="unit"
+        />
+      </div>
+    );
+    if (!name) return unitInputs;
     return (
       <div>
         <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
-        <div className="flex gap-2">
-          <input
-            type="number"
-            step="any"
-            value={unitVal.value || ''}
-            onChange={e => onChange({ ...unitVal, value: e.target.value ? Number(e.target.value) : 0 })}
-            className="flex-1 px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
-          />
-          <input
-            value={unitVal.unit}
-            onChange={e => onChange({ ...unitVal, unit: e.target.value })}
-            className="w-20 px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
-            placeholder="unit"
-          />
-        </div>
+        {unitInputs}
       </div>
     );
   }
@@ -600,6 +621,90 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
           rows={6}
           className="w-full px-3 py-2 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 font-mono"
         />
+      </div>
+    );
+  }
+
+  if (def.type === 'checklist') {
+    const items = Array.isArray(value) ? value as { text: string; checked: boolean }[] : [];
+    return (
+      <div className="sm:col-span-2">
+        <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+        <div className="space-y-1">
+          {items.map((ci, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input type="checkbox" checked={ci.checked} onChange={e => { const updated = [...items]; updated[i] = { ...ci, checked: e.target.checked }; onChange(updated); }} className="accent-stone-600" />
+              <input value={ci.text} onChange={e => { const updated = [...items]; updated[i] = { ...ci, text: e.target.value }; onChange(updated); }} className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+              <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-stone-300 hover:text-red-400 text-sm">&times;</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => onChange([...items, { text: '', checked: false }])} className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300">+ Add item</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (def.type === 'range') {
+    const r = (typeof value === 'object' && value != null) ? value as { min: number; max: number } : { min: 0, max: 0 };
+    return (
+      <div>
+        <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+        <div className="flex items-center gap-2">
+          <input type="number" step="any" value={r.min} onChange={e => onChange({ ...r, min: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Min" />
+          <span className="text-stone-400">–</span>
+          <input type="number" step="any" value={r.max} onChange={e => onChange({ ...r, max: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Max" />
+        </div>
+      </div>
+    );
+  }
+
+  if (def.type === 'kvp') {
+    const pairs = Array.isArray(value) ? value as { key: string; value: string }[] : [];
+    return (
+      <div className="sm:col-span-2">
+        <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+        <div className="space-y-1">
+          {pairs.map((p, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input value={p.key} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, key: e.target.value }; onChange(updated); }} placeholder="Key" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+              <input value={p.value} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, value: e.target.value }; onChange(updated); }} placeholder="Value" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+              <button type="button" onClick={() => onChange(pairs.filter((_, j) => j !== i))} className="text-stone-300 hover:text-red-400 text-sm">&times;</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => onChange([...pairs, { key: '', value: '' }])} className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300">+ Add pair</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (def.type === 'rating') {
+    const max = def.rating_max ?? 5;
+    const current = typeof value === 'number' ? value : 0;
+    if (def.rating_style === 'number') {
+      return (
+        <div>
+          <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={max + 0.5} step={0.5} value={current} onChange={e => onChange(Number(e.target.value))} className="w-20 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <span className="text-xs text-stone-400">/ {max}</span>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
+        <div className="flex items-center gap-0.5">
+          {Array.from({ length: max }, (_, i) => {
+            const starVal = i + 1;
+            return (
+              <button key={i} type="button" onClick={() => onChange(starVal <= current ? starVal - 1 : starVal)}
+                className={`text-xl leading-none ${starVal <= current ? 'text-yellow-400' : starVal - 0.5 <= current ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'} hover:scale-110 transition-transform`}
+              >★</button>
+            );
+          })}
+          <span className="text-xs text-stone-400 ml-1">{current}</span>
+        </div>
       </div>
     );
   }
@@ -672,9 +777,14 @@ function LinkFieldInput({ name, def, value, onChange }: {
                   key={it.id}
                   type="button"
                   onClick={() => { onChange({ uuid: it.uuid, name: it.name }); setSearch(''); setOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 flex items-center gap-2"
                 >
-                  {it.name}
+                  {it.images?.[0] ? (
+                    <img src={api.images.thumbUrl(it.uuid, it.images[0].id)} alt="" className="h-8 w-8 rounded object-cover shrink-0" />
+                  ) : (
+                    <div className="h-8 w-8 rounded bg-stone-100 dark:bg-stone-700 shrink-0" />
+                  )}
+                  <span>{it.name}</span>
                 </button>
               ))}
             </div>
@@ -690,6 +800,10 @@ function getDefaultForType(fd: FieldDef): unknown {
     case 'int': case 'float': return null;
     case 'unit': return { value: 0, unit: fd.default_unit || '' };
     case 'link': return null;
+    case 'checklist': return [];
+    case 'range': return { min: 0, max: 0 };
+    case 'kvp': return [];
+    case 'rating': return 0;
     default: return '';
   }
 }

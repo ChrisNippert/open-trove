@@ -440,6 +440,41 @@ export default function ItemDetailPage() {
                         >
                           {String(val)}
                         </a>
+                      ) : fd.type === 'checklist' && Array.isArray(val) ? (
+                        <div className="space-y-1">
+                          {(val as { text: string; checked: boolean }[]).map((ci, i) => (
+                            <label key={i} className="flex items-center gap-2 text-sm text-stone-800 dark:text-stone-200">
+                              <input type="checkbox" checked={ci.checked} readOnly className="accent-stone-600" />
+                              <span className={ci.checked ? 'line-through text-stone-400 dark:text-stone-500' : ''}>{ci.text}</span>
+                            </label>
+                          ))}
+                          {(val as unknown[]).length === 0 && <span className="text-sm text-stone-400">&mdash;</span>}
+                        </div>
+                      ) : fd.type === 'rating' && val != null ? (
+                        <div className="flex items-center gap-1">
+                          {(fd as FieldDef).rating_style === 'number' ? (
+                            <span className="text-sm text-stone-800 dark:text-stone-200">{val} / {(fd as FieldDef).rating_max ?? 5}</span>
+                          ) : (
+                            <>
+                              {Array.from({ length: Math.floor((fd as FieldDef).rating_max ?? 5) }, (_, i) => (
+                                <span key={i} className={`text-lg ${i < Math.floor(Number(val)) ? 'text-yellow-400' : i < Number(val) ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'}`}>★</span>
+                              ))}
+                              <span className="text-xs text-stone-400 dark:text-stone-500 ml-1">{val}</span>
+                            </>
+                          )}
+                        </div>
+                      ) : fd.type === 'kvp' && Array.isArray(val) ? (
+                        <div className="space-y-0.5">
+                          {(val as { key: string; value: string }[]).map((pair, i) => (
+                            <div key={i} className="flex gap-2 text-sm">
+                              <span className="font-medium text-stone-600 dark:text-stone-300">{pair.key}:</span>
+                              <span className="text-stone-800 dark:text-stone-200">{pair.value}</span>
+                            </div>
+                          ))}
+                          {(val as unknown[]).length === 0 && <span className="text-sm text-stone-400">&mdash;</span>}
+                        </div>
+                      ) : fd.type === 'range' && val && typeof val === 'object' ? (
+                        <span className="text-sm text-stone-800 dark:text-stone-200">{(val as { min: number }).min} – {(val as { max: number }).max}</span>
                       ) : (
                         <div className={`text-sm text-stone-800 dark:text-stone-200 break-words ${fd.type === 'textarea' ? 'whitespace-pre-wrap' : ''}`}>
                           {formatDisplay(val, fd.type)}
@@ -457,6 +492,14 @@ export default function ItemDetailPage() {
       <div className="mt-6 text-xs text-stone-400 dark:text-stone-500">
         Created: {new Date(item.created_at).toLocaleString()} &middot; Updated: {new Date(item.updated_at).toLocaleString()}
       </div>
+
+      {/* JSON view */}
+      <details className="mt-4">
+        <summary className="text-sm text-stone-400 dark:text-stone-500 cursor-pointer hover:text-stone-600 dark:hover:text-stone-300">Show raw JSON</summary>
+        <pre className="mt-2 p-4 bg-stone-100 dark:bg-stone-800 rounded-lg text-xs overflow-x-auto text-stone-600 dark:text-stone-300">
+          {JSON.stringify({ id: item.id, uuid: item.uuid, name: item.name, schema_id: item.schema_id, data: item.data, tags: item.tags }, null, 2)}
+        </pre>
+      </details>
 
       {/* Lightbox */}
       {lightboxImage && (
@@ -645,6 +688,22 @@ function EditableField({ def, value, onChange }: {
 }) {
   if (def.type === 'dropdown') {
     const options = def.options || def['dropdown-items'] || [];
+    if (def.allow_custom) {
+      return (
+        <div className="relative">
+          <input
+            list={`dd-${def.type}-${options.join(',')}`}
+            value={String(value || '')}
+            onChange={e => onChange(e.target.value)}
+            placeholder="Select or type..."
+            className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+          />
+          <datalist id={`dd-${def.type}-${options.join(',')}`}>
+            {options.map(o => <option key={o} value={o} />)}
+          </datalist>
+        </div>
+      );
+    }
     return (
       <select value={String(value || '')} onChange={e => onChange(e.target.value)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200">
         <option value="">Select...</option>
@@ -670,13 +729,14 @@ function EditableField({ def, value, onChange }: {
     return <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} />;
   }
   if (def.type === 'int' || def.type === 'float') {
-    return <input type="number" step={def.type === 'float' ? 'any' : '1'} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value ? Number(e.target.value) : null)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
+    const blocked = def.type === 'int' ? ['e','E','+','.'] : ['e','E','+'];
+    return <input type="number" step={def.type === 'float' ? 'any' : '1'} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value ? Number(e.target.value) : null)} onKeyDown={e => { if (blocked.includes(e.key)) e.preventDefault(); }} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
   }
   if (def.type === 'unit') {
     const uv = typeof value === 'object' && value != null ? value as { value: number; unit: string } : { value: 0, unit: def.default_unit || '' };
     return (
       <div className="flex gap-1">
-        <input type="number" step="any" value={uv.value || ''} onChange={e => onChange({ ...uv, value: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+        <input type="number" step="any" value={uv.value != null ? uv.value : ''} onChange={e => onChange({ ...uv, value: Number(e.target.value) })} onKeyDown={e => { if (['e','E','+'].includes(e.key)) e.preventDefault(); }} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
         <input value={uv.unit} onChange={e => onChange({ ...uv, unit: e.target.value })} className="w-16 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
       </div>
     );
@@ -698,6 +758,72 @@ function EditableField({ def, value, onChange }: {
   }
   if (def.type === 'url') {
     return <input type="url" value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} placeholder="https://..." className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
+  }
+  if (def.type === 'checklist') {
+    const items = Array.isArray(value) ? value as { text: string; checked: boolean }[] : [];
+    return (
+      <div className="space-y-1">
+        {items.map((ci, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input type="checkbox" checked={ci.checked} onChange={e => { const updated = [...items]; updated[i] = { ...ci, checked: e.target.checked }; onChange(updated); }} className="accent-stone-600" />
+            <input value={ci.text} onChange={e => { const updated = [...items]; updated[i] = { ...ci, text: e.target.value }; onChange(updated); }} className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-stone-300 hover:text-red-400 text-sm">&times;</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => onChange([...items, { text: '', checked: false }])} className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300">+ Add item</button>
+      </div>
+    );
+  }
+  if (def.type === 'range') {
+    const r = (typeof value === 'object' && value != null) ? value as { min: number; max: number } : { min: 0, max: 0 };
+    return (
+      <div className="flex items-center gap-2">
+        <input type="number" step="any" value={r.min} onChange={e => onChange({ ...r, min: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Min" />
+        <span className="text-stone-400">–</span>
+        <input type="number" step="any" value={r.max} onChange={e => onChange({ ...r, max: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Max" />
+      </div>
+    );
+  }
+  if (def.type === 'kvp') {
+    const pairs = Array.isArray(value) ? value as { key: string; value: string }[] : [];
+    return (
+      <div className="space-y-1">
+        {pairs.map((p, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input value={p.key} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, key: e.target.value }; onChange(updated); }} placeholder="Key" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <input value={p.value} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, value: e.target.value }; onChange(updated); }} placeholder="Value" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <button type="button" onClick={() => onChange(pairs.filter((_, j) => j !== i))} className="text-stone-300 hover:text-red-400 text-sm">&times;</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => onChange([...pairs, { key: '', value: '' }])} className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300">+ Add pair</button>
+      </div>
+    );
+  }
+  if (def.type === 'rating') {
+    const max = def.rating_max ?? 5;
+    const current = typeof value === 'number' ? value : 0;
+    if (def.rating_style === 'number') {
+      return (
+        <div className="flex items-center gap-2">
+          <input type="number" min={0} max={max + 0.5} step={0.5} value={current} onChange={e => onChange(Number(e.target.value))} className="w-20 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+          <span className="text-xs text-stone-400">/ {max}</span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-0.5">
+        {Array.from({ length: Math.ceil(max + 0.5) }, (_, i) => {
+          const starVal = (i + 1) * 0.5;
+          const full = i / 2 + 0.5;
+          return i % 2 === 0 ? (
+            <button key={i} type="button" onClick={() => onChange(full <= current ? full - 0.5 : full)}
+              className={`text-xl leading-none ${full <= current ? 'text-yellow-400' : full - 0.5 <= current ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'} hover:scale-110 transition-transform`}
+            >★</button>
+          ) : null;
+        }).filter(Boolean)}
+        <span className="text-xs text-stone-400 ml-1">{current}</span>
+      </div>
+    );
   }
   return <input value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value)} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
 }
@@ -749,9 +875,14 @@ function LinkFieldEdit({ def, value, onChange }: {
               key={it.id}
               type="button"
               onClick={() => { onChange({ uuid: it.uuid, name: it.name }); setSearch(''); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 flex items-center gap-2"
             >
-              {it.name}
+              {it.images?.[0] ? (
+                <img src={api.images.thumbUrl(it.uuid, it.images[0].id)} alt="" className="h-8 w-8 rounded object-cover shrink-0" />
+              ) : (
+                <div className="h-8 w-8 rounded bg-stone-100 dark:bg-stone-700 shrink-0" />
+              )}
+              <span>{it.name}</span>
             </button>
           ))}
         </div>
@@ -803,6 +934,10 @@ function getDefaultForType(fd: FieldDef): unknown {
     case 'int': case 'float': return null;
     case 'unit': return { value: 0, unit: fd.default_unit || '' };
     case 'link': return null;
+    case 'checklist': return [];
+    case 'range': return { min: 0, max: 0 };
+    case 'kvp': return [];
+    case 'rating': return 0;
     default: return '';
   }
 }
@@ -810,9 +945,26 @@ function getDefaultForType(fd: FieldDef): unknown {
 function formatDisplay(val: unknown, fieldType?: string): string {
   if (fieldType === 'boolean') return val === true ? 'Yes' : 'No';
   if (val == null || val === '') return '—';
+  if (fieldType === 'checklist' && Array.isArray(val)) {
+    const items = val as { text: string; checked: boolean }[];
+    return items.map(i => `${i.checked ? '☑' : '☐'} ${i.text}`).join(', ') || '—';
+  }
+  if (fieldType === 'range') {
+    const r = val as { min: number; max: number };
+    if (typeof r === 'object' && r != null && 'min' in r) return `${r.min} – ${r.max}`;
+  }
+  if (fieldType === 'kvp' && Array.isArray(val)) {
+    return val.map((p: unknown) => { const kv = p as { key: string; value: string }; return `${kv.key}: ${kv.value}`; }).join(', ') || '—';
+  }
+  if (fieldType === 'rating') {
+    return `${val}`;
+  }
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
-  if (Array.isArray(val)) return val.join(', ') || '—';
-  if (typeof val === 'object' && 'name' in (val as Record<string, unknown>) && 'id' in (val as Record<string, unknown>)) {
+  if (Array.isArray(val)) return val.map(item => {
+    if (item && typeof item === 'object' && 'name' in item) return item.name;
+    return String(item);
+  }).join(', ') || '—';
+  if (typeof val === 'object' && 'name' in (val as Record<string, unknown>)) {
     return (val as { name: string }).name;
   }
   if (typeof val === 'object' && 'value' in (val as Record<string, unknown>)) {
