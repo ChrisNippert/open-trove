@@ -712,8 +712,8 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
   const [expanded, setExpanded] = useState(false);
 
   // Does this type have configurable options?
-  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link', 'hierarchy'].includes(def.type) || def.type === 'string';
-  const supportsCardinality = !['computed'].includes(def.type);
+  const hasConfig = ['dropdown', 'multiselect', 'unit', 'computed', 'link', 'hierarchy', 'rating'].includes(def.type) || def.type === 'string';
+  const supportsCardinality = !['computed', 'multiselect', 'checklist', 'kvp', 'image', 'dropdown', 'boolean'].includes(def.type);
 
   // Auto-expand options panel when switching to a configurable type
   useEffect(() => {
@@ -776,9 +776,10 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
             <button
               onClick={() => {
                 const cur = def.max_count;
-                // Decrement: ∞ → undefined(1), 2 → undefined(1), n → n-1
+                // Decrement: ∞ → 1, 1 → ∞, 2 → 1, n → n-1
                 if (cur === 0) onUpdate('max_count', undefined); // ∞ → 1
-                else if (cur == null || cur <= 2) onUpdate('max_count', undefined); // 1 or 2 → 1
+                else if (cur == null || cur === 1) onUpdate('max_count', 0); // 1 → ∞
+                else if (cur === 2) onUpdate('max_count', undefined); // 2 → 1
                 else onUpdate('max_count', cur - 1);
               }}
               className="w-5 h-5 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-600 dark:hover:text-stone-300 text-sm"
@@ -817,8 +818,8 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
             <button
               onClick={() => {
                 const cur = def.max_count;
-                if (cur == null) onUpdate('max_count', 2);
-                else if (cur === 0) {} // already unlimited
+                if (cur == null) onUpdate('max_count', 2); // 1 → 2
+                else if (cur === 0) onUpdate('max_count', undefined); // ∞ → 1
                 else onUpdate('max_count', cur + 1);
               }}
               className="w-5 h-5 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-700 hover:text-stone-600 dark:hover:text-stone-300 text-sm"
@@ -943,10 +944,22 @@ function FieldDefEditor({ name, def, allGroups, onRename, onUpdate, onRemove, on
           {def.type === 'rating' && (
             <div className="flex gap-3 items-end">
               <div>
+                <label className="text-stone-500 dark:text-stone-400">Min rating</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={(def.rating_max ?? 5) - 0.5}
+                  step={0.5}
+                  value={def.rating_min ?? 0}
+                  onChange={e => onUpdate('rating_min', Number(e.target.value))}
+                  className="w-16 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-sm mt-1 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200"
+                />
+              </div>
+              <div>
                 <label className="text-stone-500 dark:text-stone-400">Max rating</label>
                 <input
                   type="number"
-                  min={1}
+                  min={(def.rating_min ?? 0) + 0.5}
                   max={10}
                   step={0.5}
                   value={def.rating_max ?? 5}

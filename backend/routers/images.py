@@ -38,13 +38,19 @@ def _create_thumbnail(image_path: Path, thumb_path: Path):
     try:
         with PILImage.open(image_path) as img:
             img.thumbnail(THUMBNAIL_SIZE, PILImage.Resampling.LANCZOS)
-            if img.mode in ("RGBA", "P"):
-                background = PILImage.new("RGB", img.size, (255, 255, 255))
-                if img.mode == "P":
+            has_transparency = (
+                img.mode in ("RGBA", "LA", "PA")
+                or (img.mode == "P" and "transparency" in img.info)
+            )
+            if has_transparency:
+                thumb_path_png = thumb_path.with_suffix(".png")
+                if img.mode != "RGBA":
                     img = img.convert("RGBA")
-                background.paste(img, mask=img.split()[3])
-                img = background
+                img.save(thumb_path_png, "PNG")
+                return thumb_path_png.name
             thumb_path_jpg = thumb_path.with_suffix(".jpg")
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             img.save(thumb_path_jpg, "JPEG", quality=85)
             return thumb_path_jpg.name
     except Exception:

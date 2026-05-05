@@ -19,7 +19,10 @@ SAFE_OPS = {
 
 
 def _resolve_field_ref(ref: str, data: dict) -> float | None:
-    """Resolve a field reference like 'price' or 'amount.value' from item data."""
+    """Resolve a field reference like 'price' or 'amount.value' from item data.
+    
+    For multi-entry (list) fields, returns the sum of numeric values.
+    """
     parts = ref.split(".")
     val = data
     for part in parts:
@@ -31,6 +34,18 @@ def _resolve_field_ref(ref: str, data: dict) -> float | None:
             return None
     if isinstance(val, (int, float)):
         return float(val)
+    if isinstance(val, list):
+        total = 0.0
+        for item in val:
+            if isinstance(item, (int, float)):
+                total += float(item)
+            elif isinstance(item, dict) and "value" in item:
+                v = item["value"]
+                if isinstance(v, (int, float)):
+                    total += float(v)
+            else:
+                return None
+        return total
     return None
 
 

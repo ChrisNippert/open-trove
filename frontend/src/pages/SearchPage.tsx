@@ -15,6 +15,7 @@ interface Facet {
   min?: number | null;
   max?: number | null;
   unit?: string;
+  units?: string[];
   true_count?: number;
   false_count?: number;
 }
@@ -99,6 +100,7 @@ export default function SearchPage() {
   const rangeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initializedGroupRef = useRef(false);
   const previousGroupFilterRef = useRef<number | ''>(groupFilter);
+  const previousSchemaFilterRef = useRef<number | ''>(schemaFilter);
 
   useEffect(() => { api.groups.list().then(setGroups); }, []);
 
@@ -116,8 +118,10 @@ export default function SearchPage() {
   useEffect(() => {
     const isInitialLoad = !initializedGroupRef.current;
     const previousGroup = previousGroupFilterRef.current;
+    const previousSchema = previousSchemaFilterRef.current;
     initializedGroupRef.current = true;
     previousGroupFilterRef.current = groupFilter;
+    previousSchemaFilterRef.current = schemaFilter;
 
     if (groupFilter) {
       setFacetsLoading(true);
@@ -137,7 +141,7 @@ export default function SearchPage() {
       setTags([]);
     }
 
-    if (!isInitialLoad && previousGroup !== groupFilter) {
+    if (!isInitialLoad && (previousGroup !== groupFilter || previousSchema !== schemaFilter)) {
       setSelectedTags(new Set());
       setCheckboxFilters({});
       setDropdownFilters({});
@@ -169,9 +173,16 @@ export default function SearchPage() {
     // Range filters → >= and <=
     for (const [field, range] of Object.entries(rangeFilters)) {
       const facet = facets[field];
-      const pathSuffix = facet?.type === 'unit' ? '.value' : '';
-      if (range.min) filters.push({ field: field + pathSuffix, op: '>=', value: parseFloat(range.min) });
-      if (range.max) filters.push({ field: field + pathSuffix, op: '<=', value: parseFloat(range.max) });
+      if (facet?.type === 'unit') {
+        if (range.min) filters.push({ field: field + '.value', op: '>=', value: parseFloat(range.min) });
+        if (range.max) filters.push({ field: field + '.value', op: '<=', value: parseFloat(range.max) });
+      } else if (facet?.type === 'range') {
+        if (range.min) filters.push({ field: field + '.min', op: '>=', value: parseFloat(range.min) });
+        if (range.max) filters.push({ field: field + '.max', op: '<=', value: parseFloat(range.max) });
+      } else {
+        if (range.min) filters.push({ field, op: '>=', value: parseFloat(range.min) });
+        if (range.max) filters.push({ field, op: '<=', value: parseFloat(range.max) });
+      }
     }
     return filters;
   }, [checkboxFilters, dropdownFilters, rangeFilters, facets]);
@@ -289,16 +300,25 @@ export default function SearchPage() {
       let display = '';
       if (v && typeof v === 'object' && 'name' in (v as Record<string, unknown>)) {
         display = (v as { name: string }).name;
+      } else if (v && typeof v === 'object' && 'min' in (v as Record<string, unknown>) && 'max' in (v as Record<string, unknown>)) {
+        const r = v as { min: number; max: number };
+        display = `${r.min} – ${r.max}`;
       } else if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
         const u = v as { value: number; unit: string };
         display = `${u.value} ${u.unit}`;
       } else if (Array.isArray(v)) {
         display = v.map(item => {
           if (item && typeof item === 'object' && 'name' in item) return item.name;
+          if (item && typeof item === 'object' && 'key' in item && 'value' in item) return `${(item as {key:string}).key}: ${(item as {value:string}).value}`;
+          if (item && typeof item === 'object' && 'text' in item) return `${(item as {checked:boolean}).checked ? '☑' : '☐'} ${(item as {text:string}).text}`;
+          if (item && typeof item === 'object' && 'value' in item && 'unit' in item) return `${(item as {value:number; unit:string}).value} ${(item as {value:number; unit:string}).unit}`;
           return String(item);
         }).join(', ');
       } else if (typeof v === 'boolean') {
         display = v ? 'Yes' : 'No';
+      } else if (v && typeof v === 'object') {
+        // Fallback for unrecognized objects - try JSON or key summary
+        try { display = JSON.stringify(v); if (display.length > 60) display = display.slice(0, 60) + '…'; } catch { display = ''; }
       } else {
         const s = String(v ?? '');
         display = s.length > 60 ? s.slice(0, 60) + '…' : s;
@@ -470,29 +490,39 @@ export default function SearchPage() {
                 const childOpts = selectedParent ? (childrenMap[selectedParent] || []) : [];
                 return (
                   <FilterSection key={fieldName} title={fieldName} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
-                    <select
-                      value={selectedParent}
-                      onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value }))}
-                      className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
-                    >
-                      <option value="">Any</option>
-                      {parents.map(p => {
-                        const pOpt = opts.find(o => o.value === p);
-                        return <option key={p} value={p}>{p} ({pOpt?.count ?? 0})</option>;
-                      })}
-                    </select>
-                    {selectedParent && childOpts.length > 0 && (
-                      <select
-                        value={selectedChild}
-                        onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value || selectedParent }))}
-                        className="w-full mt-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
-                      >
-                        <option value="">All</option>
-                        {childOpts.map(c => (
-                          <option key={c.value} value={c.value}>{c.value.split(' > ')[1]} ({c.count})</option>
-                        ))}
-                      </select>
-                    )}
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 mb-1 font-medium">Category</label>
+                        <select
+                          value={selectedParent}
+                          onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value }))}
+                          className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                        >
+                          <option value="">Any</option>
+                          {parents.map(p => {
+                            const pOpt = opts.find(o => o.value === p);
+                            const childrenCount = (childrenMap[p] || []).reduce((sum, c) => sum + c.count, 0);
+                            const totalCount = (pOpt?.count ?? 0) + childrenCount;
+                            return <option key={p} value={p}>{p} ({totalCount})</option>;
+                          })}
+                        </select>
+                      </div>
+                      {selectedParent && childOpts.length > 0 && (
+                        <div className="pl-3 border-l-2 border-stone-200 dark:border-stone-700">
+                          <label className="block text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 mb-1 font-medium">Subcategory</label>
+                          <select
+                            value={selectedChild}
+                            onChange={e => setDropdownFilters(prev => ({ ...prev, [fieldName]: e.target.value || selectedParent }))}
+                            className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded text-xs bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                          >
+                            <option value="">All</option>
+                            {childOpts.map(c => (
+                              <option key={c.value} value={c.value}>{c.value.split(' > ')[1]} ({c.count})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   </FilterSection>
                 );
               }
@@ -575,11 +605,11 @@ export default function SearchPage() {
                 );
               }
 
-              if (facet.type === 'int' || facet.type === 'float' || facet.type === 'unit') {
+              if (facet.type === 'int' || facet.type === 'float' || facet.type === 'unit' || facet.type === 'range') {
                 // Hide range filter if min equals max (single value)
                 if (facet.min != null && facet.max != null && facet.min === facet.max) return null;
                 const range = rangeFilters[fieldName] || { min: '', max: '' };
-                const unitLabel = facet.unit ? ` (${facet.unit})` : '';
+                const unitLabel = facet.units?.length ? ` (${facet.units.join(', ')})` : facet.unit ? ` (${facet.unit})` : '';
                 return (
                   <FilterSection key={fieldName} title={fieldName + unitLabel} collapsed={collapsed} onToggle={() => toggleSection(sectionKey)}>
                     <div className="flex items-center gap-2">
@@ -664,16 +694,17 @@ export default function SearchPage() {
                 </div>
                 {viewMode === 'grid' && (
                   <div className="flex items-center gap-1 border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden">
-                    {[2, 3, 4, 5].map(n => (
-                      <button
-                        key={n}
-                        onClick={() => setGridCols(n)}
-                        className={`px-2 py-1 text-xs ${gridCols === n ? 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200' : 'text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800'}`}
-                        title={`${n} per row`}
-                      >
-                        {n}
-                      </button>
-                    ))}
+                    <button
+                      onClick={() => setGridCols(c => Math.max(1, c - 1))}
+                      className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                      title="Fewer columns"
+                    >−</button>
+                    <span className="px-2 py-1 text-xs text-stone-600 dark:text-stone-300 tabular-nums">{gridCols}</span>
+                    <button
+                      onClick={() => setGridCols(c => c + 1)}
+                      className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                      title="More columns"
+                    >+</button>
                   </div>
                 )}
               </div>

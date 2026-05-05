@@ -27,6 +27,7 @@ export interface FieldDef {
   hierarchy_options?: Record<string, string[]>;
   filterable?: boolean;
   allow_custom?: boolean;
+  rating_min?: number;
   rating_max?: number;
   rating_style?: 'stars' | 'number';
 }

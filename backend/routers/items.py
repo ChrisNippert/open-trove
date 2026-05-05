@@ -12,14 +12,17 @@ from ..services.computed import recompute_item
 router = APIRouter(prefix="/api/groups/{group_id}/items", tags=["items"])
 
 
-def _item_to_out(item: Item) -> ItemOut:
+def _item_to_out(item: Item, schema_def: dict | None = None) -> ItemOut:
+    data = json.loads(item.data) if item.data else {}
+    if schema_def:
+        data = recompute_item(data, schema_def)
     return ItemOut(
         id=item.id,
         uuid=item.uuid or "",
         group_id=item.group_id,
         schema_id=item.schema_id,
         name=item.name or "",
-        data=json.loads(item.data) if item.data else {},
+        data=data,
         tags=[t.tag for t in (item.tags or [])],
         images=[ImageOut.model_validate(img) for img in sorted(item.images or [], key=lambda i: i.sort_order)],
         created_at=item.created_at,
@@ -41,7 +44,7 @@ async def list_items(
 
     q = (
         select(Item)
-        .options(selectinload(Item.tags), selectinload(Item.images))
+        .options(selectinload(Item.tags), selectinload(Item.images), selectinload(Item.schema))
         .where(Item.group_id == group_id)
     )
     if schema_id is not None:
@@ -50,7 +53,7 @@ async def list_items(
 
     result = await db.execute(q)
     items = result.scalars().all()
-    return [_item_to_out(item) for item in items]
+    return [_item_to_out(item, json.loads(item.schema.definition) if item.schema and item.schema.definition else None) for item in items]
 
 
 @router.post("", response_model=ItemOut, status_code=201)
@@ -98,13 +101,14 @@ async def create_item(group_id: int, body: ItemCreate, db: AsyncSession = Depend
 async def get_item(group_id: int, item_uuid: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Item)
-        .options(selectinload(Item.tags), selectinload(Item.images))
+        .options(selectinload(Item.tags), selectinload(Item.images), selectinload(Item.schema))
         .where(Item.uuid == item_uuid, Item.group_id == group_id)
     )
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Item not found")
-    return _item_to_out(item)
+    schema_def = json.loads(item.schema.definition) if item.schema and item.schema.definition else None
+    return _item_to_out(item, schema_def)
 
 
 @router.put("/{item_uuid}", response_model=ItemOut)

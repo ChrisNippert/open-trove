@@ -2,6 +2,18 @@
 
 A self-hosted inventory and collection manager with user-defined schemas. Build your own structure for anything — wardrobe, kitchen, board games, tools, whatever — then search, filter, and browse it all from one place.
 
+Collection UI
+![alt text](collection.png)
+
+Item View
+![alt text](item.png)
+
+Item Editor
+![alt text](item-edit.png)
+
+Schema Creator
+![alt text](schema.png)
+
 ## What it does
 
 Open Trove lets you create **collections** (called Groups), define **schemas** that describe the shape of items in that collection, then add items with structured data, tags, and images. Think of it like a personal database with a UI that adapts to whatever you're tracking.

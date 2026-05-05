@@ -169,7 +169,7 @@ async def search(
     return [_item_to_out(item) for item in items]
 
 
-FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit", "hierarchy", "string"}
+FACET_TYPES = {"dropdown", "multiselect", "boolean", "int", "float", "unit", "hierarchy", "string", "range"}
 
 
 @router.get("/facets")
@@ -232,16 +232,17 @@ async def get_facets(
                 base_ids = f_ids
 
     # Build base filter clause for SQL queries
+    schema_clause = f"AND items.schema_id = {int(schema_id)} " if schema_id is not None else ""
     if base_ids is not None:
         if not base_ids:
             # No items match filters — still build facet structure with zero counts
             id_list = "-1"  # impossible ID to get zero counts from DB
-            base_clause = f"AND items.id IN ({id_list}) "
+            base_clause = f"AND items.id IN ({id_list}) {schema_clause}"
         else:
             id_list = ",".join(str(int(i)) for i in base_ids)
-            base_clause = f"AND items.id IN ({id_list}) "
+            base_clause = f"AND items.id IN ({id_list}) {schema_clause}"
     else:
-        base_clause = ""
+        base_clause = schema_clause
 
     schemas_query = select(ItemSchema).where(ItemSchema.group_id == group_id)
     if schema_id is not None:
@@ -297,6 +298,11 @@ async def get_facets(
                         {"value": opt, "count": value_counts.get(opt, 0)}
                         for opt in schema_options
                     ]
+                    # Include custom values not in schema options (from allow_custom dropdowns)
+                    schema_options_set = set(schema_options)
+                    for val, cnt in value_counts.items():
+                        if val not in schema_options_set:
+                            options.append({"value": val, "count": cnt})
                     facets[field_name] = {
                         "type": ftype, "field": field_name, "options": options,
                     }
@@ -331,18 +337,57 @@ async def get_facets(
                     }
 
                 elif ftype == "unit":
+                    # Handle both scalar {value, unit} and array [{value, unit}, ...] (multi-entry)
                     mm = await db.execute(text(
-                        "SELECT MIN(CAST(json_extract(data, :path) AS REAL)), "
-                        "MAX(CAST(json_extract(data, :path) AS REAL)) "
-                        f"FROM items WHERE group_id = :gid {base_clause}"
-                        "AND json_extract(data, :path) IS NOT NULL"
-                    ), {"path": f"$.{field_name}.value", "gid": group_id})
+                        "SELECT MIN(v), MAX(v) FROM ("
+                        "  SELECT CAST(json_extract(data, :path) AS REAL) AS v"
+                        f"  FROM items WHERE group_id = :gid {base_clause}"
+                        "  AND json_extract(data, :path) IS NOT NULL"
+                        "  UNION ALL"
+                        "  SELECT CAST(json_extract(j.value, '$.value') AS REAL) AS v"
+                        f"  FROM items, json_each(json_extract(items.data, :arr_path)) j"
+                        f"  WHERE items.group_id = :gid {base_clause}"
+                        "  AND json_type(items.data, :arr_path) = 'array'"
+                        "  AND json_extract(j.value, '$.value') IS NOT NULL"
+                        ")"
+                    ), {"path": f"$.{field_name}.value", "arr_path": f"$.{field_name}", "gid": group_id})
                     row = mm.fetchone()
+                    # Collect distinct unit strings used across items
+                    units_result = await db.execute(text(
+                        "SELECT DISTINCT u FROM ("
+                        "  SELECT json_extract(data, :upath) AS u"
+                        f"  FROM items WHERE group_id = :gid {base_clause}"
+                        "  AND json_extract(data, :upath) IS NOT NULL"
+                        "  UNION ALL"
+                        "  SELECT json_extract(j.value, '$.unit') AS u"
+                        f"  FROM items, json_each(json_extract(items.data, :arr_path)) j"
+                        f"  WHERE items.group_id = :gid {base_clause}"
+                        "  AND json_type(items.data, :arr_path) = 'array'"
+                        "  AND json_extract(j.value, '$.unit') IS NOT NULL"
+                        ") WHERE u IS NOT NULL AND u != ''"
+                    ), {"upath": f"$.{field_name}.unit", "arr_path": f"$.{field_name}", "gid": group_id})
+                    distinct_units = [r[0] for r in units_result.fetchall()]
                     facets[field_name] = {
                         "type": "unit", "field": field_name,
                         "min": row[0] if row else None,
                         "max": row[1] if row else None,
                         "unit": field_def.get("default_unit", ""),
+                        "units": distinct_units,
+                    }
+
+                elif ftype == "range":
+                    # Range fields store {min, max} — find the overall min of mins and max of maxes
+                    mm = await db.execute(text(
+                        "SELECT MIN(CAST(json_extract(data, :path_min) AS REAL)), "
+                        "MAX(CAST(json_extract(data, :path_max) AS REAL)) "
+                        f"FROM items WHERE group_id = :gid {base_clause}"
+                        "AND json_extract(data, :path_min) IS NOT NULL"
+                    ), {"path_min": f"$.{field_name}.min", "path_max": f"$.{field_name}.max", "gid": group_id})
+                    row = mm.fetchone()
+                    facets[field_name] = {
+                        "type": "range", "field": field_name,
+                        "min": row[0] if row else None,
+                        "max": row[1] if row else None,
                     }
 
                 elif ftype == "string":

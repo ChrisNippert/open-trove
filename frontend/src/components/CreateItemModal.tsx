@@ -649,10 +649,10 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
     return (
       <div>
         <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
-        <div className="flex items-center gap-2">
-          <input type="number" step="any" value={r.min} onChange={e => onChange({ ...r, min: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Min" />
-          <span className="text-stone-400">–</span>
-          <input type="number" step="any" value={r.max} onChange={e => onChange({ ...r, max: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Max" />
+        <div className="flex items-center gap-2 max-w-xs">
+          <input type="number" step="any" value={r.min} onChange={e => onChange({ ...r, min: Number(e.target.value) })} onFocus={e => e.target.select()} className="flex-1 min-w-0 w-24 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Min" />
+          <span className="text-stone-400 shrink-0">–</span>
+          <input type="number" step="any" value={r.max} onChange={e => onChange({ ...r, max: Number(e.target.value) })} onFocus={e => e.target.select()} className="flex-1 min-w-0 w-24 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Max" />
         </div>
       </div>
     );
@@ -663,11 +663,11 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
     return (
       <div className="sm:col-span-2">
         <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
-        <div className="space-y-1">
+        <div className="space-y-1 max-w-lg">
           {pairs.map((p, i) => (
             <div key={i} className="flex items-center gap-2">
-              <input value={p.key} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, key: e.target.value }; onChange(updated); }} placeholder="Key" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
-              <input value={p.value} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, value: e.target.value }; onChange(updated); }} placeholder="Value" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+              <input value={p.key} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, key: e.target.value }; onChange(updated); }} placeholder="Key" className="w-1/3 min-w-0 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+              <input value={p.value} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, value: e.target.value }; onChange(updated); }} placeholder="Value" className="flex-1 min-w-0 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
               <button type="button" onClick={() => onChange(pairs.filter((_, j) => j !== i))} className="text-stone-300 hover:text-red-400 text-sm">&times;</button>
             </div>
           ))}
@@ -678,14 +678,15 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
   }
 
   if (def.type === 'rating') {
+    const min = def.rating_min ?? 0;
     const max = def.rating_max ?? 5;
-    const current = typeof value === 'number' ? value : 0;
+    const current = typeof value === 'number' ? value : min;
     if (def.rating_style === 'number') {
       return (
         <div>
           <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
           <div className="flex items-center gap-2">
-            <input type="number" min={0} max={max + 0.5} step={0.5} value={current} onChange={e => onChange(Number(e.target.value))} className="w-20 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <input type="number" min={min} max={max} step={0.5} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value === '' ? min : Number(e.target.value))} className="w-20 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder={String(min)} />
             <span className="text-xs text-stone-400">/ {max}</span>
           </div>
         </div>
@@ -694,16 +695,18 @@ function FieldInput({ name, def, value, onChange, namedImageSelection, available
     return (
       <div>
         <label className="block text-sm text-stone-500 dark:text-stone-400 mb-1">{label}</label>
-        <div className="flex items-center gap-0.5">
-          {Array.from({ length: max }, (_, i) => {
-            const starVal = i + 1;
-            return (
-              <button key={i} type="button" onClick={() => onChange(starVal <= current ? starVal - 1 : starVal)}
-                className={`text-xl leading-none ${starVal <= current ? 'text-yellow-400' : starVal - 0.5 <= current ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'} hover:scale-110 transition-transform`}
-              >★</button>
-            );
-          })}
-          <span className="text-xs text-stone-400 ml-1">{current}</span>
+        <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
+            {Array.from({ length: max }, (_, i) => {
+              const starVal = i + 1;
+              return (
+                <button key={i} type="button" onClick={() => onChange(starVal <= current ? Math.max(starVal - 1, min) : starVal)}
+                  className={`text-xl leading-none ${starVal <= current ? 'text-yellow-400' : starVal - 0.5 <= current ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'} hover:scale-110 transition-transform`}
+                >★</button>
+              );
+            })}
+          </div>
+          <input type="number" min={min} max={max} step={0.5} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value === '' ? min : Number(e.target.value))} className="w-14 px-1 py-0.5 border border-stone-300 dark:border-stone-600 rounded text-xs text-center bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder={String(min)} />
         </div>
       </div>
     );

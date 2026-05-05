@@ -169,9 +169,9 @@ export default function GroupDetailPage() {
       setGroup(g);
       setSchemas(s);
       setItems(i);
-      // Apply default sort from schema if no user sort set
-      if (!searchParams.get('sort') && s.length > 0) {
-        const def = s[0].definition;
+      // Apply default sort from schema if viewing a specific schema and no user sort set
+      if (!searchParams.get('sort') && selectedSchema && s.length > 0) {
+        const def = s.find(sc => sc.id === selectedSchema)?.definition;
         if (def?.default_sort) {
           setSortFieldRaw(def.default_sort);
           setSortDirRaw(def.default_sort_dir || 'asc');
@@ -193,6 +193,21 @@ export default function GroupDetailPage() {
 
   useEffect(() => {
     if (!loading) loadItems();
+    // Apply selected schema's default sort when switching schemas (unless user explicitly set sort via URL)
+    if (!searchParams.get('sort') && selectedSchema) {
+      const schema = schemas.find(s => s.id === selectedSchema);
+      if (schema?.definition?.default_sort) {
+        setSortFieldRaw(schema.definition.default_sort);
+        setSortDirRaw(schema.definition.default_sort_dir || 'asc');
+      } else {
+        setSortFieldRaw('');
+        setSortDirRaw('desc');
+      }
+    } else if (!selectedSchema) {
+      // Viewing all schemas: always reset to empty (per-schema grouping), clearing URL params too
+      setSortField('');
+      setSortDirRaw('desc');
+    }
   }, [selectedSchema]);
 
   async function handleCreateSchema(e: React.FormEvent) {
@@ -365,7 +380,38 @@ export default function GroupDetailPage() {
   const sortedItems = useMemo(() => {
     const arr = [...items];
     if (!sortField) {
-      // Default: sort by id (date added)
+      // When no explicit sort: group by schema, apply each schema's default sort within group
+      const schemaMap = new Map(schemas.map(s => [s.id, s]));
+      const hasDefaults = schemas.some(s => s.definition?.default_sort);
+      if (hasDefaults) {
+        arr.sort((a, b) => {
+          // Group by schema first
+          if (a.schema_id !== b.schema_id) return a.schema_id - b.schema_id;
+          // Within same schema, apply that schema's default sort
+          const schema = schemaMap.get(a.schema_id);
+          const defSort = schema?.definition?.default_sort;
+          const defDir = schema?.definition?.default_sort_dir || 'asc';
+          if (!defSort) return sortDir === 'asc' ? a.id - b.id : b.id - a.id;
+          if (defSort === 'name') {
+            const av = (a.name || '').toLowerCase();
+            const bv = (b.name || '').toLowerCase();
+            return defDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+          }
+          let av: unknown = a.data[defSort];
+          let bv: unknown = b.data[defSort];
+          if (av && typeof av === 'object' && 'value' in (av as Record<string,unknown>)) av = (av as { value: number }).value;
+          if (bv && typeof bv === 'object' && 'value' in (bv as Record<string,unknown>)) bv = (bv as { value: number }).value;
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          if (typeof av === 'number' && typeof bv === 'number') return defDir === 'asc' ? av - bv : bv - av;
+          const as = String(av).toLowerCase();
+          const bs = String(bv).toLowerCase();
+          return defDir === 'asc' ? as.localeCompare(bs) : bs.localeCompare(as);
+        });
+        return arr;
+      }
+      // No defaults: sort by id (date added)
       arr.sort((a, b) => sortDir === 'asc' ? a.id - b.id : b.id - a.id);
       return arr;
     }
@@ -405,7 +451,7 @@ export default function GroupDetailPage() {
       return sortDir === 'asc' ? as.localeCompare(bs) : bs.localeCompare(as);
     });
     return arr;
-  }, [items, sortField, sortDir]);
+  }, [items, sortField, sortDir, schemas]);
 
   if (loading) {
     return (
@@ -696,16 +742,17 @@ export default function GroupDetailPage() {
         <span className="text-sm text-stone-400 dark:text-stone-500 ml-2">{sortedItems.length} items</span>
         {viewMode === 'grid' && (
           <div className="flex items-center gap-1 ml-2 border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden">
-            {[2, 3, 4, 5].map(n => (
               <button
-                key={n}
-                onClick={() => setGridCols(n)}
-                className={`px-2 py-1 text-xs ${gridCols === n ? 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200' : 'text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800'}`}
-                title={`${n} per row`}
-              >
-                {n}
-              </button>
-            ))}
+                onClick={() => setGridCols(c => Math.max(1, c - 1))}
+                className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                title="Fewer columns"
+              >−</button>
+              <span className="px-2 py-1 text-xs text-stone-600 dark:text-stone-300 tabular-nums">{gridCols}</span>
+              <button
+                onClick={() => setGridCols(c => c + 1)}
+                className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                title="More columns"
+              >+</button>
           </div>
         )}
         <div className="ml-auto flex items-center gap-2">
@@ -772,7 +819,7 @@ export default function GroupDetailPage() {
           ))}
         </div>
       ) : (
-        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} onBulkDeleted={loadItems} sortField={sortField} sortDir={sortDir} onSort={(field) => {
+        <ItemTable items={sortedItems} groupId={gid} schemas={schemas} selectedSchema={selectedSchema} onDelete={handleDeleteItem} onDuplicate={handleDuplicateItem} onBulkDeleted={loadItems} sortField={sortField} sortDir={sortDir} onSort={(field) => {
           if (sortField === field) { setSortDir(sortDir === 'asc' ? 'desc' : 'asc'); }
           else { setSortField(field); setSortDir('asc'); }
         }} />
@@ -794,10 +841,11 @@ export default function GroupDetailPage() {
   );
 }
 
-function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDeleted, sortField, sortDir, onSort }: {
+function ItemTable({ items, groupId, schemas, selectedSchema, onDelete, onDuplicate, onBulkDeleted, sortField, sortDir, onSort }: {
   items: Item[];
   groupId: number;
   schemas: ItemSchema[];
+  selectedSchema?: number;
   onDelete: (uuid: string) => void;
   onDuplicate: (item: Item) => void;
   onBulkDeleted: () => void;
@@ -849,12 +897,35 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
     return formatValue(value);
   }
 
-  // Collect all unique field names across items
-  const allFields = new Set<string>();
-  items.forEach(item => {
-    Object.keys(item.data).forEach(k => allFields.add(k));
-  });
-  const fields = Array.from(allFields);
+  // Collect field names in schema-definition order (stable regardless of sort)
+  const fields = useMemo(() => {
+    const schemaFields: string[] = [];
+    const schemaFieldSet = new Set<string>();
+    const relevantSchemas = selectedSchema
+      ? schemas.filter(s => s.id === selectedSchema)
+      : schemas;
+    for (const s of relevantSchemas) {
+      const sections = (s.definition as { sections?: Record<string, Record<string, unknown>> })?.sections;
+      if (sections) {
+        for (const sectionFields of Object.values(sections)) {
+          for (const fn of Object.keys(sectionFields)) {
+            if (!schemaFieldSet.has(fn)) {
+              schemaFieldSet.add(fn);
+              schemaFields.push(fn);
+            }
+          }
+        }
+      }
+    }
+    // Also include any data keys from items not in schemas (backwards compat), sorted alphabetically for stability
+    const extraKeys = new Set<string>();
+    items.forEach(item => {
+      Object.keys(item.data).forEach(k => {
+        if (!schemaFieldSet.has(k)) extraKeys.add(k);
+      });
+    });
+    return [...schemaFields, ...Array.from(extraKeys).sort()];
+  }, [schemas, selectedSchema, items]);
 
   function toggleItem(uuid: string) {
     setSelected(prev => {
@@ -958,7 +1029,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
       <table className="w-full text-sm" style={{ minWidth: 'max-content' }}>
         <thead>
           <tr className="border-b border-stone-200 dark:border-stone-700">
-            <th className="py-2 px-2 w-8 sticky left-0 z-10 bg-white dark:bg-stone-900">
+            <th className="py-2 px-2 w-8 sticky left-0 z-20 bg-white dark:bg-stone-900">
               <input
                 type="checkbox"
                 checked={selected.size === items.length && items.length > 0}
@@ -966,8 +1037,8 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                 className="rounded border-stone-300 dark:border-stone-600"
               />
             </th>
-            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium sticky left-8 z-10 bg-white dark:bg-stone-900">Image</th>
-            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium sticky left-[5.5rem] z-10 bg-white dark:bg-stone-900 cursor-pointer hover:text-stone-700 dark:hover:text-stone-200 select-none" onClick={() => onSort('name')}>
+            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium sticky left-8 z-20 bg-white dark:bg-stone-900 min-w-[3.5rem]">Image</th>
+            <th className="text-left py-2 px-3 text-stone-500 dark:text-stone-400 font-medium sticky left-[6rem] z-20 bg-white dark:bg-stone-900 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] cursor-pointer hover:text-stone-700 dark:hover:text-stone-200 select-none min-w-[8rem]" onClick={() => onSort('name')}>
               Name {sortField === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
             </th>
             {fields.filter(f => f !== 'name').map(f => (
@@ -981,8 +1052,8 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
         </thead>
         <tbody>
           {items.map(item => (
-            <tr key={item.uuid} className={`border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50 ${selected.has(item.uuid) ? 'bg-stone-50 dark:bg-stone-800/30' : ''}`}>
-              <td className="py-2 px-2 w-8 sticky left-0 z-10 bg-inherit">
+            <tr key={item.uuid} className={`group/row border-b border-stone-100 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800/50 ${selected.has(item.uuid) ? 'bg-stone-50 dark:bg-stone-800/30' : ''}`}>
+              <td className="py-2 px-2 w-8 sticky left-0 z-20 bg-white dark:bg-stone-900 group-hover/row:bg-stone-50 dark:group-hover/row:bg-stone-800/50">
                 <input
                   type="checkbox"
                   checked={selected.has(item.uuid)}
@@ -990,7 +1061,7 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                   className="rounded border-stone-300 dark:border-stone-600"
                 />
               </td>
-              <td className="py-2 px-3 sticky left-8 z-10 bg-inherit">
+              <td className="py-2 px-3 sticky left-8 z-20 bg-white dark:bg-stone-900 group-hover/row:bg-stone-50 dark:group-hover/row:bg-stone-800/50 min-w-[3.5rem]">
                 {item.images[0] ? (
                   <img
                     src={api.images.thumbUrl(item.uuid, item.images[0].id)}
@@ -999,13 +1070,13 @@ function ItemTable({ items, groupId, schemas, onDelete, onDuplicate, onBulkDelet
                   />
                 ) : null}
               </td>
-              <td className="py-2 px-3 sticky left-[5.5rem] z-10 bg-inherit">
+              <td className="py-2 px-3 sticky left-[6rem] z-20 bg-white dark:bg-stone-900 group-hover/row:bg-stone-50 dark:group-hover/row:bg-stone-800/50 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] min-w-[8rem]">
                 <Link to={`/groups/${groupId}/items/${item.uuid}`} className="text-stone-800 dark:text-stone-200 hover:underline font-medium whitespace-nowrap">
                   {item.name || `Item #${item.id}`}
                 </Link>
               </td>
               {fields.filter(f => f !== 'name').map(f => (
-                <td key={f} className="py-2 px-3 text-stone-600 dark:text-stone-400 whitespace-nowrap">
+                <td key={f} className="py-2 px-3 text-stone-600 dark:text-stone-400 max-w-[200px] truncate">
                   {renderCellValue(item, f)}
                 </td>
               ))}
@@ -1153,14 +1224,24 @@ function formatValue(val: unknown): string {
   if (typeof val === 'object' && 'name' in (val as Record<string, unknown>)) {
     return (val as { name: string }).name;
   }
+  if (typeof val === 'object' && 'min' in (val as Record<string, unknown>) && 'max' in (val as Record<string, unknown>)) {
+    const r = val as { min: number; max: number };
+    return `${r.min} – ${r.max}`;
+  }
   if (typeof val === 'object' && 'value' in (val as Record<string, unknown>) && 'unit' in (val as Record<string, unknown>)) {
     const v = val as { value: number; unit: string };
     return `${v.value} ${v.unit}`;
   }
   if (Array.isArray(val)) return val.map(item => {
     if (item && typeof item === 'object' && 'name' in item) return item.name;
+    if (item && typeof item === 'object' && 'key' in item && 'value' in item) return `${(item as {key:string}).key}: ${(item as {value:string}).value}`;
+    if (item && typeof item === 'object' && 'text' in item) return `${(item as {checked:boolean}).checked ? '☑' : '☐'} ${(item as {text:string}).text}`;
+    if (item && typeof item === 'object' && 'value' in item && 'unit' in item) return `${(item as {value:number; unit:string}).value} ${(item as {value:number; unit:string}).unit}`;
     return String(item);
   }).join(', ');
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+  if (typeof val === 'object' && val != null) {
+    try { const s = JSON.stringify(val); return s.length > 60 ? s.slice(0, 60) + '…' : s; } catch { return ''; }
+  }
   return String(val);
 }

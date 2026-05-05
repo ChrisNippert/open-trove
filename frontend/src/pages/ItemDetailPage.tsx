@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ImageSourceModal, { type ImageSourceOption } from '../components/ImageSourceModal';
@@ -82,6 +82,17 @@ export default function ItemDetailPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveField(fieldName: string, value: unknown) {
+    if (!item) return;
+    const updatedData = { ...item.data, [fieldName]: value };
+    // Optimistic update for immediate UI feedback
+    setItem(prev => prev ? { ...prev, data: updatedData } : prev);
+    try {
+      await api.items.update(gid, itemUuid, { data: updatedData });
+      await loadItem();
+    } catch { /* ignore */ }
   }
 
   async function discardPendingNamedUploads() {
@@ -366,7 +377,7 @@ export default function ItemDetailPage() {
                   }
                   const val = editing ? formData[fieldName] : item.data[fieldName];
                   const isMulti = (fd.max_count === 0 || (fd.max_count != null && fd.max_count > 1))
-                    && !['multiselect', 'boolean', 'textarea', 'computed', 'image'].includes(fd.type);
+                    && !['multiselect', 'checklist', 'kvp', 'computed', 'image'].includes(fd.type);
                   const isWide = fd.type === 'textarea' || fd.type === 'hierarchy' || isMulti;
 
                   if (isMulti) {
@@ -407,6 +418,19 @@ export default function ItemDetailPage() {
                                 <div key={i}><LinkedItemValue value={v as { uuid?: string; id?: number; name: string }} groupId={fd.link_group_id || gid} /></div>
                               ) : fd.type === 'url' && v ? (
                                 <div key={i}><a href={String(v)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300 break-all">{String(v)}</a></div>
+                              ) : fd.type === 'rating' && v != null ? (
+                                <div key={i} className="flex items-center gap-1">
+                                  {(fd as FieldDef).rating_style === 'number' ? (
+                                    <span className="text-sm text-stone-800 dark:text-stone-200">{String(v)} / {(fd as FieldDef).rating_max ?? 5}</span>
+                                  ) : (
+                                    <>
+                                      {Array.from({ length: Math.floor((fd as FieldDef).rating_max ?? 5) }, (_, si) => (
+                                        <span key={si} className={`text-lg ${si < Math.floor(Number(v)) ? 'text-yellow-400' : si < Number(v) ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'}`}>★</span>
+                                      ))}
+                                      <span className="text-xs text-stone-400 dark:text-stone-500 ml-1">{String(v)}</span>
+                                    </>
+                                  )}
+                                </div>
                               ) : (
                                 <div key={i} className="text-sm text-stone-800 dark:text-stone-200 break-words">{formatDisplay(v, fd.type)}</div>
                               )
@@ -443,8 +467,12 @@ export default function ItemDetailPage() {
                       ) : fd.type === 'checklist' && Array.isArray(val) ? (
                         <div className="space-y-1">
                           {(val as { text: string; checked: boolean }[]).map((ci, i) => (
-                            <label key={i} className="flex items-center gap-2 text-sm text-stone-800 dark:text-stone-200">
-                              <input type="checkbox" checked={ci.checked} readOnly className="accent-stone-600" />
+                            <label key={i} className="flex items-center gap-2 text-sm text-stone-800 dark:text-stone-200 cursor-pointer">
+                              <input type="checkbox" checked={ci.checked} onChange={() => {
+                                const updated = [...(val as { text: string; checked: boolean }[])];
+                                updated[i] = { ...ci, checked: !ci.checked };
+                                handleSaveField(fieldName, updated);
+                              }} className="accent-stone-600" />
                               <span className={ci.checked ? 'line-through text-stone-400 dark:text-stone-500' : ''}>{ci.text}</span>
                             </label>
                           ))}
@@ -453,25 +481,25 @@ export default function ItemDetailPage() {
                       ) : fd.type === 'rating' && val != null ? (
                         <div className="flex items-center gap-1">
                           {(fd as FieldDef).rating_style === 'number' ? (
-                            <span className="text-sm text-stone-800 dark:text-stone-200">{val} / {(fd as FieldDef).rating_max ?? 5}</span>
+                            <span className="text-sm text-stone-800 dark:text-stone-200">{String(val)} / {(fd as FieldDef).rating_max ?? 5}</span>
                           ) : (
                             <>
                               {Array.from({ length: Math.floor((fd as FieldDef).rating_max ?? 5) }, (_, i) => (
                                 <span key={i} className={`text-lg ${i < Math.floor(Number(val)) ? 'text-yellow-400' : i < Number(val) ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'}`}>★</span>
                               ))}
-                              <span className="text-xs text-stone-400 dark:text-stone-500 ml-1">{val}</span>
+                              <span className="text-xs text-stone-400 dark:text-stone-500 ml-1">{String(val)}</span>
                             </>
                           )}
                         </div>
                       ) : fd.type === 'kvp' && Array.isArray(val) ? (
-                        <div className="space-y-0.5">
+                        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
                           {(val as { key: string; value: string }[]).map((pair, i) => (
-                            <div key={i} className="flex gap-2 text-sm">
-                              <span className="font-medium text-stone-600 dark:text-stone-300">{pair.key}:</span>
-                              <span className="text-stone-800 dark:text-stone-200">{pair.value}</span>
-                            </div>
+                            <React.Fragment key={i}>
+                              <span className="text-sm font-medium text-stone-600 dark:text-stone-300 text-right">{pair.key}:</span>
+                              <span className="text-sm text-stone-800 dark:text-stone-200">{pair.value}</span>
+                            </React.Fragment>
                           ))}
-                          {(val as unknown[]).length === 0 && <span className="text-sm text-stone-400">&mdash;</span>}
+                          {(val as unknown[]).length === 0 && <span className="text-sm text-stone-400 col-span-2">&mdash;</span>}
                         </div>
                       ) : fd.type === 'range' && val && typeof val === 'object' ? (
                         <span className="text-sm text-stone-800 dark:text-stone-200">{(val as { min: number }).min} – {(val as { max: number }).max}</span>
@@ -730,7 +758,7 @@ function EditableField({ def, value, onChange }: {
   }
   if (def.type === 'int' || def.type === 'float') {
     const blocked = def.type === 'int' ? ['e','E','+','.'] : ['e','E','+'];
-    return <input type="number" step={def.type === 'float' ? 'any' : '1'} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value ? Number(e.target.value) : null)} onKeyDown={e => { if (blocked.includes(e.key)) e.preventDefault(); }} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />;
+    return <input type="number" step={def.type === 'float' ? 'any' : '1'} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} onKeyDown={e => { if (blocked.includes(e.key)) e.preventDefault(); }} onFocus={e => e.target.select()} className="w-full px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="0" />;
   }
   if (def.type === 'unit') {
     const uv = typeof value === 'object' && value != null ? value as { value: number; unit: string } : { value: 0, unit: def.default_unit || '' };
@@ -777,21 +805,21 @@ function EditableField({ def, value, onChange }: {
   if (def.type === 'range') {
     const r = (typeof value === 'object' && value != null) ? value as { min: number; max: number } : { min: 0, max: 0 };
     return (
-      <div className="flex items-center gap-2">
-        <input type="number" step="any" value={r.min} onChange={e => onChange({ ...r, min: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Min" />
-        <span className="text-stone-400">–</span>
-        <input type="number" step="any" value={r.max} onChange={e => onChange({ ...r, max: Number(e.target.value) })} className="flex-1 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Max" />
+      <div className="flex items-center gap-2 max-w-xs">
+        <input type="number" step="any" value={r.min} onChange={e => onChange({ ...r, min: Number(e.target.value) })} onFocus={e => e.target.select()} className="flex-1 min-w-0 w-24 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Min" />
+        <span className="text-stone-400 shrink-0">–</span>
+        <input type="number" step="any" value={r.max} onChange={e => onChange({ ...r, max: Number(e.target.value) })} onFocus={e => e.target.select()} className="flex-1 min-w-0 w-24 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder="Max" />
       </div>
     );
   }
   if (def.type === 'kvp') {
     const pairs = Array.isArray(value) ? value as { key: string; value: string }[] : [];
     return (
-      <div className="space-y-1">
+      <div className="space-y-1 max-w-lg">
         {pairs.map((p, i) => (
           <div key={i} className="flex items-center gap-2">
-            <input value={p.key} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, key: e.target.value }; onChange(updated); }} placeholder="Key" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
-            <input value={p.value} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, value: e.target.value }; onChange(updated); }} placeholder="Value" className="flex-1 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <input value={p.key} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, key: e.target.value }; onChange(updated); }} placeholder="Key" className="w-1/3 min-w-0 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+            <input value={p.value} onChange={e => { const updated = [...pairs]; updated[i] = { ...p, value: e.target.value }; onChange(updated); }} placeholder="Value" className="flex-1 min-w-0 px-2 py-1 border border-stone-300 dark:border-stone-600 rounded text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
             <button type="button" onClick={() => onChange(pairs.filter((_, j) => j !== i))} className="text-stone-300 hover:text-red-400 text-sm">&times;</button>
           </div>
         ))}
@@ -800,28 +828,30 @@ function EditableField({ def, value, onChange }: {
     );
   }
   if (def.type === 'rating') {
+    const min = def.rating_min ?? 0;
     const max = def.rating_max ?? 5;
-    const current = typeof value === 'number' ? value : 0;
+    const current = typeof value === 'number' ? value : min;
     if (def.rating_style === 'number') {
       return (
         <div className="flex items-center gap-2">
-          <input type="number" min={0} max={max + 0.5} step={0.5} value={current} onChange={e => onChange(Number(e.target.value))} className="w-20 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" />
+          <input type="number" min={min} max={max} step={0.5} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value === '' ? min : Number(e.target.value))} onFocus={e => e.target.select()} className="w-20 px-2 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder={String(min)} />
           <span className="text-xs text-stone-400">/ {max}</span>
         </div>
       );
     }
     return (
-      <div className="flex items-center gap-0.5">
-        {Array.from({ length: Math.ceil(max + 0.5) }, (_, i) => {
-          const starVal = (i + 1) * 0.5;
-          const full = i / 2 + 0.5;
-          return i % 2 === 0 ? (
-            <button key={i} type="button" onClick={() => onChange(full <= current ? full - 0.5 : full)}
-              className={`text-xl leading-none ${full <= current ? 'text-yellow-400' : full - 0.5 <= current ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'} hover:scale-110 transition-transform`}
-            >★</button>
-          ) : null;
-        }).filter(Boolean)}
-        <span className="text-xs text-stone-400 ml-1">{current}</span>
+      <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
+          {Array.from({ length: max }, (_, i) => {
+            const starVal = i + 1;
+            return (
+              <button key={i} type="button" onClick={() => onChange(starVal <= current ? Math.max(starVal - 1, min) : starVal)}
+                className={`text-xl leading-none ${starVal <= current ? 'text-yellow-400' : starVal - 0.5 <= current ? 'text-yellow-400 opacity-50' : 'text-stone-300 dark:text-stone-600'} hover:scale-110 transition-transform`}
+              >★</button>
+            );
+          })}
+        </div>
+        <input type="number" min={min} max={max} step={0.5} value={value != null ? String(value) : ''} onChange={e => onChange(e.target.value === '' ? min : Number(e.target.value))} onFocus={e => e.target.select()} className="w-14 px-1 py-0.5 border border-stone-300 dark:border-stone-600 rounded text-xs text-center bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200" placeholder={String(min)} />
       </div>
     );
   }

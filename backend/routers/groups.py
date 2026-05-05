@@ -151,11 +151,22 @@ async def upload_group_thumbnail(
     try:
         with PILImage.open(BytesIO(content)) as img:
             img.thumbnail(THUMBNAIL_SIZE, PILImage.Resampling.LANCZOS)
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            filename = f"group_{uuid.uuid4().hex}_thumb.jpg"
-            thumb_path = IMAGES_DIR / filename
-            img.save(thumb_path, "JPEG", quality=85)
+            has_transparency = (
+                img.mode in ("RGBA", "LA", "PA")
+                or (img.mode == "P" and "transparency" in img.info)
+            )
+            if has_transparency:
+                filename = f"group_{uuid.uuid4().hex}_thumb.png"
+                thumb_path = IMAGES_DIR / filename
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                img.save(thumb_path, "PNG")
+            else:
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                filename = f"group_{uuid.uuid4().hex}_thumb.jpg"
+                thumb_path = IMAGES_DIR / filename
+                img.save(thumb_path, "JPEG", quality=85)
     except Exception:
         raise HTTPException(400, "Could not process image")
 
