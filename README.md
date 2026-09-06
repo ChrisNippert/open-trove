@@ -127,10 +127,22 @@ Safe conversions include:
 
 ### Backend
 
+#### On Linux:
+
 ```sh
-cd organizer
+cd open-trove
 python -m venv .venv
 source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload
+```
+
+#### On Windows:
+
+```sh
+cd open-trove
+python -m venv .venv
+./.venv/Scripts/Activate.ps1 # Use PowerShell script
 pip install -r backend/requirements.txt
 uvicorn backend.main:app --reload
 ```
@@ -140,7 +152,7 @@ The API runs at `http://localhost:8000`. SQLite database is created automaticall
 ### Frontend
 
 ```sh
-cd frontend
+cd open-trove/frontend
 npm install
 npm run dev # add ` -- --host 0.0.0.0` to run on all interfaces
 ```
