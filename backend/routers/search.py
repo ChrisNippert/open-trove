@@ -47,7 +47,7 @@ async def search(
     tag: str | None = None,
     filters: str | None = None,
     offset: int = 0,
-    limit: int = Query(default=50, le=500),
+    limit: int = Query(default=500, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     """Search items by text, filter by field value, filter by tag.

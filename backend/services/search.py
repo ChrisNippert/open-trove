@@ -90,7 +90,7 @@ async def search_items(
     db: AsyncSession,
     query: str,
     group_id: int | None = None,
-    limit: int = 50,
+    limit: int = 500,
     offset: int = 0,
 ) -> list[int]:
     """Search items by text query, returns list of item IDs."""
@@ -132,7 +132,7 @@ async def filter_items_by_field(
     field_path: str,
     op: str,
     value,
-    limit: int = 50,
+    limit: int = 500,
     offset: int = 0,
 ) -> list[int]:
     """Filter items by a JSON field value. Returns item IDs.

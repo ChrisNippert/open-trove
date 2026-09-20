@@ -35,7 +35,7 @@ async def list_items(
     group_id: int,
     schema_id: int | None = None,
     offset: int = 0,
-    limit: int = Query(default=50, le=500),
+    limit: int = Query(default=500, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     group = await db.get(Group, group_id)
