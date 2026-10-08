@@ -18,7 +18,7 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
     : null;
 
   return (
-    <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group">
+    <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 overflow-hidden hover:border-stone-300 dark:hover:border-stone-600 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 group" title={name}>
       <Link to={`/groups/${groupId}/items/${item.uuid}`}>
         {/* Image area */}
         <div className="aspect-square bg-stone-100 dark:bg-stone-800 relative overflow-hidden">
@@ -61,6 +61,7 @@ export default function ItemCard({ item, groupId, onDelete }: Props) {
           onDelete();
         }}
         className="absolute top-2 right-2 bg-white/80 dark:bg-stone-800/80 rounded-full p-1 text-stone-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+        title="Delete item"
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
