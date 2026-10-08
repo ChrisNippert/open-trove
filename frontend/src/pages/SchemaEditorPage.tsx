@@ -536,6 +536,26 @@ export default function SchemaEditorPage() {
           </div>
         </div>
       )}
+      
+      {/* Default columns count */}
+      {(() => {
+          return <div className="mt-4 flex items-center gap-2">
+            <label className="text-xs text-stone-400 dark:text-stone-500">Default columns:</label>
+            <div className="flex items-center gap-1 ml-2 border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setDefinition({ ...definition, default_col_count: Math.max(1, ((definition.default_col_count || 4) - 1)) })}
+                className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                title="Fewer columns"
+              >−</button>
+              <span className="px-2 py-1 text-xs text-stone-600 dark:text-stone-300 tabular-nums">{definition.default_col_count || 4}</span>
+              <button
+                onClick={() => setDefinition({ ...definition, default_col_count: (definition.default_col_count || 4) + 1 })}
+                className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                title="More columns"
+              >+</button>
+            </div>
+          </div>
+      })()}
 
       {/* Default sort */}
       {(() => {

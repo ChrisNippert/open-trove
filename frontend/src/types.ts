@@ -42,6 +42,7 @@ export interface SchemaDefinition {
   sections: SchemaSections;
   default_sort?: string;
   default_sort_dir?: 'asc' | 'desc';
+  default_col_count?: number;
 }
 
 export interface ItemSchema {

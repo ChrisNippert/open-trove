@@ -141,7 +141,11 @@ export default function GroupDetailPage() {
     setSearchParams(prev => { const p = new URLSearchParams(prev); p.set('dir', v); return p; }, { replace: true });
   };
   const [thumbVersion, setThumbVersion] = useState(0);
-  const [gridCols, setGridCols] = useState(4);
+  const [gridCols, setGridColsRaw] = useState(searchParams.get('cols') != null ? parseInt(searchParams.get('cols')!) : 4);
+  const setGridCols = (v: number) => {
+    setGridColsRaw(v);
+    setSearchParams(prev => { const p = new URLSearchParams(prev); if (v) p.set('cols', v); else p.delete('cols'); return p; }, { replace: true });
+  };
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -203,10 +207,20 @@ export default function GroupDetailPage() {
         setSortFieldRaw('');
         setSortDirRaw('desc');
       }
+      if (schema?.definition?.default_col_count) {
+        setGridColsRaw(schema.definition.default_col_count);
+      } else {
+        setGridColsRaw(4);
+      }
     } else if (!selectedSchema) {
       // Viewing all schemas: always reset to empty (per-schema grouping), clearing URL params too
-      setSortField('');
-      setSortDirRaw('desc');
+      if (!searchParams.get('sort')) {
+        setSortFieldRaw('');
+        setSortDirRaw('desc');
+      }
+      if (!searchParams.get('cols')) {
+        setGridColsRaw(4);
+      }
     }
   }, [selectedSchema]);
 
@@ -743,13 +757,13 @@ export default function GroupDetailPage() {
         {viewMode === 'grid' && (
           <div className="flex items-center gap-1 ml-2 border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden">
               <button
-                onClick={() => setGridCols(c => Math.max(1, c - 1))}
+                onClick={() => setGridCols(Math.max(1, gridCols - 1))}
                 className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
                 title="Fewer columns"
               >−</button>
               <span className="px-2 py-1 text-xs text-stone-600 dark:text-stone-300 tabular-nums">{gridCols}</span>
               <button
-                onClick={() => setGridCols(c => c + 1)}
+                onClick={() => setGridCols(gridCols + 1)}
                 className="px-2 py-1 text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
                 title="More columns"
               >+</button>

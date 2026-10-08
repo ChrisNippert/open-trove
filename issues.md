@@ -1,6 +1,6 @@
 
 
-# Issues noticed 9/6/2026
+# Issues:
 - Naming a field the same thing in different sections results in data being shared between them. Should warn that filed name is already in use or block the user from multiple of the same fields.
 - The default sorting saved in the schema displays the data by default accordingly, but does not update the default sort dropdown and error, which should reflect the default sorting field saved in the schema if the user hasn't touched it.
 - Cannot override the default sorting if set in the json config, so dropdown is nonfuctional if the default storting is populated
@@ -9,7 +9,17 @@
 - the views only show 50 item cards in a collection at a time, even if the collection contains more items than 50
     - needs to either load all initially, paginate, or show an error of maximum reached
     - max should be configurable per collection
+- The search filter for tags is "OR"-ing multiple selected tags, when it should be "AND"-ing those search filters
 
-# Manual fixes implemented
+# Nice to haves:
+- items per row should be configurable in the collection settings, as it is with default sorting
+- hovering over an item card in the collection view should show the full item name as a tooltip
+- search result item picture thumbnails should be cropped to squares, as the are for the collection view thumbnails
+
+
+---
+
+# Manual fixes implemented:
 - the main collection view is not using the thumbnail images => fixed
 - the views only show 50 item cards in a collection at a time, even if the collection contains more items than 50 => upped to 500 for now
+- Make the default column count configurable by schema, and make the column count be read from search parameters when listed in the url
