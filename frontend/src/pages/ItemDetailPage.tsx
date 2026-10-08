@@ -596,6 +596,7 @@ function LinkedItemValue({ value, groupId }: {
     <Link
       to={`/groups/${targetGroup}/items/${targetUuid}`}
       className="inline-flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300 underline hover:text-stone-900 dark:hover:text-white"
+      onClick={() => window.scrollTo(0, 0)}
     >
       {thumb && (
         <img
