@@ -170,6 +170,24 @@ python seed_data.py
 
 This creates three example collections with sample items — a Wardrobe with clothing and outfits, a Kitchen with recipes, and a Board Games collection.
 
+### Start Backend & Frontend Using PM2
+
+After setting up the two services, they can easily be started as background tasks using PM2.
+
+1. Install: `npm install -g pm2`
+2. From root open-trove directory: `pm2 start ecosystem.config.cjs`
+   a. OR on Windows just double click the `ecosystem-start.bat` file
+3. Terminals should open to run the commands to start the two services, but then close automatically if they started successfully
+4. Check if `http://localhost:5173/groups` is up and running!
+
+#### Maintenance:
+- Status all running services: `pm2 status`
+- View the logs of a service: `pm2 logs backend` (or frontend)
+- View the details of a service: `pm2 describe backend` (or frontend)
+- Delete a service: `pm2 delete backend` (or frontend)
+- Recreate a service (after deletion): `pm2 start ecosystem.config.cjs --only backend` (or frontend)
+
+
 ## Stack
 
 | Layer | Tech |
